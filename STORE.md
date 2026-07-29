@@ -91,26 +91,85 @@ Open source under the MIT licence.
 
 ### Privacy practices
 
-This is the part reviewers read closely. Answer it like this:
+This is the part reviewers actually read. Every field below is filled in in
+English, because that is what the review team works in, even though the
+dashboard itself may be in another language.
 
-- **Single purpose**: *Editing PDF files locally in the browser.*
-- **Data collected**: none. Tick nothing.
-- **Remote code**: **No.** Every library is bundled in the package; the content
-  security policy blocks external scripts.
-- **Privacy policy URL**:
+**Single purpose**
 
-  ```
-  https://github.com/Nueueuet/pdf-toolbox/blob/main/PRIVACY.md
-  ```
+```
+PDF Toolbox is a single-purpose PDF editing workspace that opens in its own tab.
+Everything it does serves that one purpose: merging, splitting, removing,
+reordering and rotating pages, cropping, compressing, upscaling, adding text,
+stamps and watermarks, changing page backgrounds, converting pages to PNG, JPG
+or CSV, and adding or removing a PDF password. All of it runs locally in the
+tab. The extension has no content scripts, collects no data, and contacts no
+server.
+```
 
-Permission justifications:
+**Remote code: No.** Every library is bundled in the package, and the extension's
+content security policy (`script-src 'self'`) blocks anything else from running.
+Answering "yes" here is both wrong and a guaranteed trip through a much deeper
+review.
 
-| Permission | Paste this |
-| --- | --- |
-| `storage`, `unlimitedStorage` | Stores the user's saved stamps, and lets the workspace hold large documents in memory. Nothing is transmitted. |
-| `downloads` | Saves the PDF, image and CSV files the user exports. |
-| `debugger` (optional) | Only for the "URL to PDF" feature. Chrome's page-to-PDF printer is reachable solely through the DevTools protocol, so the extension attaches to a background tab it opened itself, calls Page.printToPDF, and detaches immediately. It is requested at the moment the user uses that feature, never at install time. |
-| Host permissions (optional) | Only for "URL to PDF", and only for the address the user types in. Requested at point of use. |
+**Data collected: none.** Leave every category unticked, then tick all three
+confirmation boxes at the bottom — they are required to submit.
+
+**Privacy policy URL**
+
+```
+https://github.com/Nueueuet/pdf-toolbox/blob/main/PRIVACY.md
+```
+
+### Permission justifications
+
+Each field takes up to 1000 characters; these fit comfortably.
+
+`storage`
+
+```
+Stores the user's saved stamps — reusable text blocks they create themselves —
+plus small workspace preferences, using chrome.storage.local. This data stays on
+the user's device, is never transmitted, and is removed with the extension.
+```
+
+`unlimitedStorage`
+
+```
+Documents being edited are held locally while the user works on them. A single
+scanned or multi-hundred-page PDF easily exceeds the default storage quota,
+which would make edits fail partway through a job. No data is transmitted; the
+quota only affects what the extension may keep on the user's own device.
+```
+
+`downloads`
+
+```
+Saves the files the user produces: the edited PDF, the individual parts created
+by the split tool, exported PNG or JPG images, and CSV files. The API is used
+only to write these results to the user's own download folder under a meaningful
+filename. Nothing is downloaded from the internet.
+```
+
+`debugger` *(optional — requested at point of use, never at install time)*
+
+```
+Used only by the optional "URL to PDF" feature. Chrome's page-to-PDF renderer
+(Page.printToPDF) is reachable only through the DevTools protocol, so there is no
+other way to offer it. When the user types a URL and starts the capture, the
+extension opens that URL in a background tab it creates itself, attaches the
+debugger to that one tab, calls Page.printToPDF, then immediately detaches and
+closes the tab. It never attaches to tabs the user opened, never reads page
+content, and never stays attached. Users who do not use this feature are never
+asked for the permission and never grant it.
+```
+
+Host permissions *(optional)*
+
+```
+Requested only when the user runs "URL to PDF", and only for the address they
+typed in, so that the background tab can load that page for printing.
+```
 
 > The `debugger` permission draws extra review scrutiny — expect a slower first
 > review. If you would rather avoid that entirely, remove `debugger` from
