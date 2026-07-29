@@ -1,0 +1,11 @@
+# Fetched by `npm run vendor` / `npm run vendor:ai`, not source.
+vendor/
+
+# Generated samples for the test suite.
+test-files/
+
+# Scratch directories used while unpacking npm tarballs.
+.vendor-tmp/
+.ai-tmp/
+
+node_modules/

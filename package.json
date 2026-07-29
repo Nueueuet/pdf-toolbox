@@ -1,0 +1,16 @@
+{
+  "name": "pdf-toolbox",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Chrome extension that opens a full PDF editing workspace in a new tab.",
+  "type": "module",
+  "scripts": {
+    "vendor": "node scripts/fetch-vendor.mjs",
+    "vendor:ai": "node scripts/fetch-ai.mjs",
+    "icons": "node scripts/make-icons.mjs",
+    "test-files": "node scripts/make-test-pdfs.mjs",
+    "dev": "node scripts/dev-server.mjs",
+    "check": "node scripts/check.mjs",
+    "setup": "npm run vendor && npm run icons && npm run check"
+  }
+}

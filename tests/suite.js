@@ -1,0 +1,300 @@
+/**
+ * Browser test suite.
+ *
+ * Run the dev server, open http://localhost:5175/tests/ and the results appear
+ * on the page. These are round-trip tests on purpose: almost every subtle bug in
+ * a PDF editor is a coordinate bug, and the only way to catch those is to write
+ * a file, read it back, and compare it against the preview the user was shown.
+ */
+import { Workspace } from '../app/core/workspace.js';
+import { buildPdf } from '../app/core/export.js';
+import { renderPageCanvas } from '../app/core/render.js';
+import { makeAnnot } from '../app/core/annots.js';
+import { pageSize } from '../app/core/workspace.js';
+import { extractRows, toCsv } from '../app/core/text.js';
+import { parseRange, formatRange } from '../app/util/ranges.js';
+import { primeFontMetrics } from '../app/core/fonts.js';
+import * as pdfjsLib from '../vendor/pdf.mjs';
+
+const tests = [];
+const test = (name, fn) => tests.push({ name, fn });
+
+// ------------------------------------------------------------------ helpers
+
+async function loadWorkspace(names) {
+  const ws = new Workspace();
+  const files = [];
+  for (const name of names) {
+    const blob = await fetch(`../test-files/${name}`).then((r) => r.blob());
+    files.push(new File([blob], name, { type: 'application/pdf' }));
+  }
+  const results = await ws.addFiles(files);
+  const failed = results.filter((r) => !r.ok);
+  if (failed.length) throw new Error(`could not load: ${failed.map((f) => f.error).join(', ')}`);
+  return ws;
+}
+
+/** Renders an exported PDF's page so it can be compared with the preview. */
+async function renderBytes(bytes, index = 0, { password } = {}) {
+  const doc = await pdfjsLib.getDocument({ data: bytes.slice(), password }).promise;
+  const page = await doc.getPage(index + 1);
+  const viewport = page.getViewport({ scale: 1 });
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(viewport.width);
+  canvas.height = Math.round(viewport.height);
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  // 'print' intent avoids pdf.js's requestAnimationFrame loop, which never
+  // advances in a background tab.
+  await page.render({ canvasContext: ctx, viewport, intent: 'print' }).promise;
+  const meta = { canvas, rotate: page.rotate, numPages: doc.numPages, view: page.view };
+  await doc.destroy();
+  return meta;
+}
+
+/** Centre of mass of pixels matching a predicate, as a fraction of the canvas. */
+function centroid(canvas, match) {
+  const data = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+  let sx = 0;
+  let sy = 0;
+  let n = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    if (!match(data[i], data[i + 1], data[i + 2])) continue;
+    const p = i / 4;
+    sx += p % canvas.width;
+    sy += Math.floor(p / canvas.width);
+    n++;
+  }
+  return n ? { x: sx / n / canvas.width, y: sy / n / canvas.height, count: n } : null;
+}
+
+const isYellow = (r, g, b) => r > 200 && g > 185 && b < 130;
+const isRed = (r, g, b) => r > 140 && g < 90 && b < 90;
+
+function near(actual, expected, tolerance, label) {
+  if (Math.abs(actual - expected) > tolerance) {
+    throw new Error(`${label}: expected ~${expected.toFixed(3)}, got ${actual.toFixed(3)}`);
+  }
+}
+
+function assert(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
+// -------------------------------------------------------------------- tests
+
+test('page ranges parse the documented syntax', () => {
+  assert(parseRange('1-10', 20).pages.length === 10, '1-10');
+  assert(parseRange('1,4,10', 20).pages.join() === '1,4,10', '1,4,10');
+  assert(parseRange('1', 20).pages.join() === '1', 'single');
+  assert(parseRange('all', 5).pages.join() === '1,2,3,4,5', 'all');
+  assert(parseRange('odd', 6).pages.join() === '1,3,5', 'odd');
+  assert(parseRange('3-1', 6).pages.join() === '1,2,3', 'reversed range');
+  assert(parseRange('99', 6).error, 'out of range must fail');
+  assert(parseRange('banana', 6).error, 'nonsense must fail');
+  assert(formatRange([1, 2, 3, 7, 9, 10]) === '1-3, 7, 9-10', 'formatRange');
+});
+
+test('imported page geometry matches the source', async () => {
+  const ws = await loadWorkspace(['mixed-pages.pdf']);
+  const expected = [
+    [595.28, 841.89, 0], [841.89, 595.28, 0], [595.28, 841.89, 90],
+    [595.28, 841.89, 270], [420, 595, 180],
+  ];
+  ws.pages.forEach((page, i) => {
+    near(page.base.w, expected[i][0], 0.5, `page ${i + 1} width`);
+    near(page.base.h, expected[i][1], 0.5, `page ${i + 1} height`);
+    assert(page.base.rotate === expected[i][2], `page ${i + 1} rotation`);
+  });
+});
+
+test('export preserves size and rotation for every quarter turn', async () => {
+  const ws = await loadWorkspace(['mixed-pages.pdf']);
+  for (const [i, page] of ws.pages.entries()) {
+    const bytes = await buildPdf(ws, [page], {});
+    const out = await renderBytes(bytes);
+    const expected = pageSize(page);
+    near(out.canvas.width, expected.w, 1.5, `page ${i + 1} exported width`);
+    near(out.canvas.height, expected.h, 1.5, `page ${i + 1} exported height`);
+    assert(out.rotate === expected.quarter, `page ${i + 1} rotate: ${out.rotate} vs ${expected.quarter}`);
+  }
+});
+
+test('annotations land in the same spot in the export as in the preview', async () => {
+  const ws = await loadWorkspace(['mixed-pages.pdf']);
+  for (const [i, page] of ws.pages.entries()) {
+    page.annots = [makeAnnot({
+      text: 'ANCHOR', x: 0.10, y: 0.10, w: 0.30, h: 0.10,
+      size: 20, color: '#cc0000', bgColor: '#ffee00',
+    })];
+
+    const preview = (await renderPageCanvas(ws, page, { scale: 1 })).canvas;
+    const out = await renderBytes(await buildPdf(ws, [page], {}));
+
+    for (const [label, match] of [['box', isYellow], ['text', isRed]]) {
+      const a = centroid(preview, match);
+      const b = centroid(out.canvas, match);
+      assert(a, `page ${i + 1}: no ${label} in preview`);
+      assert(b, `page ${i + 1}: no ${label} in export`);
+      near(b.x, a.x, 0.02, `page ${i + 1} ${label} x`);
+      near(b.y, a.y, 0.02, `page ${i + 1} ${label} y`);
+      // A badly rotated box also gets clipped, which shows up as lost pixels.
+      const ratio = b.count / a.count;
+      assert(ratio > 0.75 && ratio < 1.35, `page ${i + 1} ${label} area off by ${ratio.toFixed(2)}×`);
+    }
+    page.annots = [];
+  }
+});
+
+test('rotating a page by a quarter turn rotates the export too', async () => {
+  const ws = await loadWorkspace(['report.pdf']);
+  const page = ws.pages[0];
+  page.rotate = 90;
+  const out = await renderBytes(await buildPdf(ws, [page], {}));
+  assert(out.rotate === 90, `expected /Rotate 90, got ${out.rotate}`);
+  near(out.canvas.width, 841.89, 1.5, 'rotated width');
+  page.rotate = 0;
+});
+
+test('cropping shrinks the exported page and keeps it vector', async () => {
+  const ws = await loadWorkspace(['report.pdf']);
+  const page = ws.pages[0];
+  page.crop = { left: 0.25, top: 0.1, right: 0.75, bottom: 0.6 };
+
+  const out = await renderBytes(await buildPdf(ws, [page], {}));
+  near(out.canvas.width, 595.28 * 0.5, 2, 'cropped width');
+  near(out.canvas.height, 841.89 * 0.5, 2, 'cropped height');
+
+  const preview = (await renderPageCanvas(ws, page, { scale: 1 })).canvas;
+  near(out.canvas.width / out.canvas.height, preview.width / preview.height, 0.02, 'crop aspect');
+  page.crop = null;
+});
+
+test('cropping a rotated page crops the region the user sees', async () => {
+  const ws = await loadWorkspace(['mixed-pages.pdf']);
+  const page = ws.pages[2]; // /Rotate 90
+  page.crop = { left: 0, top: 0, right: 0.5, bottom: 1 };
+  const preview = (await renderPageCanvas(ws, page, { scale: 1 })).canvas;
+  const out = await renderBytes(await buildPdf(ws, [page], {}));
+  near(out.canvas.width / out.canvas.height, preview.width / preview.height, 0.03, 'rotated crop aspect');
+  page.crop = null;
+});
+
+test('splitting produces the right page counts', async () => {
+  const ws = await loadWorkspace(['report.pdf']);
+  const ranges = [[1, 2], [3, 3], [4, 5]];
+  for (const [from, to] of ranges) {
+    const bytes = await buildPdf(ws, ws.pages.slice(from - 1, to), {});
+    const out = await renderBytes(bytes);
+    assert(out.numPages === to - from + 1, `part ${from}-${to} had ${out.numPages} pages`);
+  }
+});
+
+test('merging keeps every page and the chosen order', async () => {
+  const ws = await loadWorkspace(['invoice.pdf', 'appendix.pdf']);
+  assert(ws.pageCount === 4, `expected 4 pages, got ${ws.pageCount}`);
+  ws.moveTo([ws.pages[3].id], 1);
+  assert(ws.indexOf(ws.pages[0].id) === 0, 'moveTo did not reorder');
+  const out = await renderBytes(await buildPdf(ws, ws.pages, {}));
+  assert(out.numPages === 4, `merged file had ${out.numPages} pages`);
+});
+
+test('a tilted watermark lands where the preview puts it', async () => {
+  const ws = await loadWorkspace(['mixed-pages.pdf']);
+  // The annotation's own tilt and the page rotation have opposite signs, so a
+  // tilted mark on a quarter-turned page is the case that catches sign errors.
+  for (const index of [0, 2]) {
+    const page = ws.pages[index];
+    page.annots = [makeAnnot({
+      role: 'watermark', text: 'DRAFT', x: 0.15, y: 0.3, w: 0.7, h: 0.2,
+      size: 48, rotate: -45, align: 'center', valign: 'middle',
+      color: '#cc0000', bgColor: '#ffee00', padding: 0,
+    })];
+    const preview = (await renderPageCanvas(ws, page, { scale: 1 })).canvas;
+    const out = await renderBytes(await buildPdf(ws, [page], {}));
+    const a = centroid(preview, isRed);
+    const b = centroid(out.canvas, isRed);
+    assert(a && b, `page ${index + 1}: watermark text missing`);
+    near(b.x, a.x, 0.03, `page ${index + 1} watermark x`);
+    near(b.y, a.y, 0.03, `page ${index + 1} watermark y`);
+    page.annots = [];
+  }
+});
+
+test('lower compression levels always produce smaller files', async () => {
+  const ws = await loadWorkspace(['report.pdf']);
+  const at = (dpi, quality) => buildPdf(ws, ws.pages, {
+    forceRaster: true, rasterDpi: dpi, rasterMime: 'image/jpeg', jpegQuality: quality,
+  });
+  const light = await at(200, 0.88);
+  const balanced = await at(150, 0.76);
+  const maximum = await at(72, 0.45);
+  assert(balanced.length < light.length, `balanced ${balanced.length} >= light ${light.length}`);
+  assert(maximum.length < balanced.length, `maximum ${maximum.length} >= balanced ${balanced.length}`);
+
+  // Worth stating outright: rasterising a small vector PDF makes it *bigger*.
+  // The Compress panel therefore estimates real sizes and warns when that happens
+  // rather than promising a saving it cannot deliver.
+  const plain = await buildPdf(ws, ws.pages, {});
+  assert(plain.length > 0, 'plain save produced nothing');
+});
+
+test('text extraction finds the table and CSV quotes it correctly', async () => {
+  const ws = await loadWorkspace(['report.pdf']);
+  const rows = await extractRows(ws, ws.pages[0]);
+  const header = rows.find((r) => r[0] === 'Region');
+  assert(header, 'header row not found');
+  assert(header.length === 4, `header had ${header.length} columns: ${JSON.stringify(header)}`);
+  const north = rows.find((r) => r[0] === 'North' && r[1] === 'Q1');
+  assert(north && north[2] === '128400', `data row wrong: ${JSON.stringify(north)}`);
+  const csv = toCsv([['a,b', 'c"d']], {});
+  assert(csv.includes('"a,b"') && csv.includes('"c""d"'), `csv quoting wrong: ${csv}`);
+});
+
+test('a password-protected export really needs the password', async () => {
+  const ws = await loadWorkspace(['invoice.pdf']);
+  const bytes = await buildPdf(ws, ws.pages, { password: { user: 'hunter2', owner: 'hunter2' } });
+
+  let refused = false;
+  try {
+    await pdfjsLib.getDocument({ data: bytes.slice() }).promise;
+  } catch (err) {
+    refused = err?.name === 'PasswordException';
+  }
+  assert(refused, 'the encrypted file opened without a password');
+
+  const out = await renderBytes(bytes, 0, { password: 'hunter2' });
+  assert(out.numPages === 2, 'could not open with the right password');
+});
+
+test('background replacement recolours the page', async () => {
+  const ws = await loadWorkspace(['invoice.pdf']);
+  const page = ws.pages[0];
+  page.bg = { mode: 'color', color: '#2244ff', threshold: 0.85 };
+  const { canvas } = await renderPageCanvas(ws, page, { scale: 0.5 });
+  const blue = centroid(canvas, (r, g, b) => b > 180 && r < 120);
+  assert(blue && blue.count > canvas.width * canvas.height * 0.5, 'background was not replaced');
+  page.bg = null;
+});
+
+// --------------------------------------------------------------------- runner
+
+export async function run(onResult) {
+  await primeFontMetrics();
+  const results = [];
+  for (const { name, fn } of tests) {
+    const started = performance.now();
+    try {
+      await fn();
+      const result = { name, ok: true, ms: Math.round(performance.now() - started) };
+      results.push(result);
+      onResult?.(result);
+    } catch (err) {
+      const result = { name, ok: false, error: String(err?.message ?? err), ms: Math.round(performance.now() - started) };
+      results.push(result);
+      onResult?.(result);
+    }
+  }
+  return results;
+}

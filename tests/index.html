@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>PDF Toolbox — tests</title>
+  <style>
+    body { font: 14px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif; margin: 32px; color: #16202a; }
+    h1 { font-size: 20px; margin: 0 0 4px; }
+    p.sub { color: #5b6b7a; margin: 0 0 20px; }
+    ol { padding-left: 0; list-style: none; }
+    li { padding: 8px 12px; border-bottom: 1px solid #eef2f6; display: flex; gap: 12px; align-items: baseline; }
+    .mark { width: 18px; font-weight: 700; }
+    .ok .mark { color: #16a34a; }
+    .fail .mark { color: #dc2626; }
+    .name { flex: 1; }
+    .ms { color: #8c9bab; font-variant-numeric: tabular-nums; }
+    .err { display: block; color: #dc2626; font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; margin-top: 4px; }
+    #summary { margin-top: 18px; font-weight: 700; }
+  </style>
+</head>
+<body>
+  <h1>PDF Toolbox tests</h1>
+  <p class="sub">Round-trip checks: every case writes a real PDF, reads it back and compares it with the preview.</p>
+  <ol id="list"></ol>
+  <div id="summary">Running…</div>
+
+  <script type="module">
+    import { run } from './suite.js';
+
+    const list = document.getElementById('list');
+    const summary = document.getElementById('summary');
+
+    const results = await run((result) => {
+      const li = document.createElement('li');
+      li.className = result.ok ? 'ok' : 'fail';
+      li.innerHTML = `<span class="mark">${result.ok ? '✓' : '✕'}</span>`
+        + `<span class="name"></span><span class="ms">${result.ms} ms</span>`;
+      li.querySelector('.name').textContent = result.name;
+      if (!result.ok) {
+        const err = document.createElement('span');
+        err.className = 'err';
+        err.textContent = result.error;
+        li.querySelector('.name').appendChild(err);
+      }
+      list.appendChild(li);
+    });
+
+    const failed = results.filter((r) => !r.ok);
+    summary.textContent = failed.length
+      ? `${failed.length} of ${results.length} tests failed`
+      : `All ${results.length} tests passed`;
+    summary.style.color = failed.length ? '#dc2626' : '#16a34a';
+    window.__results = results;
+  </script>
+</body>
+</html>

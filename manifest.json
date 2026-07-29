@@ -1,0 +1,35 @@
+{
+  "manifest_version": 3,
+  "name": "PDF Toolbox",
+  "version": "0.1.0",
+  "description": "Merge, split, compress, convert, sign and edit PDF files — entirely on your own machine.",
+  "minimum_chrome_version": "116",
+
+  "action": {
+    "default_title": "Open PDF Toolbox",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+
+  "background": {
+    "service_worker": "background/service-worker.js",
+    "type": "module"
+  },
+
+  "permissions": ["storage", "unlimitedStorage", "downloads"],
+
+  "optional_permissions": ["debugger"],
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
+
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; worker-src 'self'"
+  }
+}

@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PDF Toolbox</title>
+  <link rel="icon" href="../icons/icon48.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app" id="app">
+    <header class="topbar">
+      <div class="topbar__brand">
+        <img class="topbar__logo" src="../icons/icon48.png" alt="">
+        <span class="topbar__name">PDF Toolbox</span>
+      </div>
+
+      <div class="topbar__doc" id="docBar" hidden>
+        <input class="topbar__title" id="docTitle" aria-label="Document name" spellcheck="false">
+        <span class="topbar__meta" id="docMeta"></span>
+      </div>
+
+      <div class="topbar__actions" id="topActions" hidden>
+        <button class="btn btn--icon" id="undoBtn" title="Undo (Ctrl+Z)" aria-label="Undo">↶</button>
+        <button class="btn btn--icon" id="redoBtn" title="Redo (Ctrl+Shift+Z)" aria-label="Redo">↷</button>
+        <button class="btn" id="addFilesBtn">Add files</button>
+        <button class="btn btn--primary" id="exportBtn">Save PDF</button>
+      </div>
+    </header>
+
+    <div class="body">
+      <nav class="rail" id="rail" aria-label="Tools" hidden></nav>
+
+      <main class="workspace" id="workspace">
+        <!-- Empty state: the whole surface is a drop target. -->
+        <section class="landing" id="landing">
+          <h1 class="landing__title">Edit PDF files</h1>
+          <p class="landing__sub">Merge, split, compress, convert, sign and protect — all in this one window, and none of it leaves your computer.</p>
+          <div class="dropzone" id="dropzone">
+            <svg class="dropzone__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"/>
+              <path d="M14 3v5h5"/>
+            </svg>
+            <button class="btn btn--primary btn--big" id="pickBtn">Choose PDF files</button>
+            <p class="dropzone__hint">or drop them anywhere on this page</p>
+            <p class="dropzone__note">PDFs and images (PNG, JPG) are both welcome.</p>
+          </div>
+        </section>
+
+        <!-- Working surface -->
+        <section class="surface" id="surface" hidden>
+          <div class="wsbar" id="wsbar">
+            <div class="wsbar__zoom">
+              <button class="btn btn--icon" id="zoomOut" aria-label="Zoom out">−</button>
+              <span class="wsbar__zoomvalue" id="zoomValue">30%</span>
+              <button class="btn btn--icon" id="zoomIn" aria-label="Zoom in">+</button>
+            </div>
+            <div class="segmented" id="viewToggle" role="tablist">
+              <button class="segmented__btn is-active" data-view="pages" role="tab">Pages</button>
+              <button class="segmented__btn" data-view="files" role="tab">Files</button>
+            </div>
+            <span class="wsbar__spacer"></span>
+            <span class="wsbar__status" id="selectionStatus"></span>
+            <button class="btn btn--ghost" id="selectAllBtn">Select all</button>
+            <button class="btn btn--ghost" id="clearSelBtn">Clear</button>
+          </div>
+
+          <div class="editorbar" id="editorbar" hidden>
+            <button class="btn btn--ghost" id="backToGrid">← All pages</button>
+            <span class="editorbar__label" id="editorLabel"></span>
+            <span class="wsbar__spacer"></span>
+            <button class="btn btn--icon" id="prevPage" aria-label="Previous page">‹</button>
+            <button class="btn btn--icon" id="nextPage" aria-label="Next page">›</button>
+          </div>
+
+          <div class="grid" id="pageGrid"></div>
+          <div class="editor" id="editor" hidden></div>
+        </section>
+      </main>
+
+      <aside class="panel" id="panel" hidden>
+        <header class="panel__head">
+          <h2 class="panel__title" id="panelTitle"></h2>
+          <p class="panel__blurb" id="panelBlurb"></p>
+        </header>
+        <div class="panel__body" id="panelBody"></div>
+      </aside>
+    </div>
+
+    <div class="dropveil" id="dropveil"><span>Drop files to add them</span></div>
+  </div>
+
+  <input type="file" id="filePicker" accept="application/pdf,image/png,image/jpeg" multiple hidden>
+  <div id="toasts"></div>
+  <div id="modalRoot"></div>
+
+  <!-- JSZip only ships a classic build; loading it here keeps the app modules clean. -->
+  <script src="../vendor/jszip.js"></script>
+  <script type="module" src="main.js"></script>
+</body>
+</html>
