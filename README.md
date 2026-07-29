@@ -39,8 +39,8 @@ npm run vendor:ai
 
 | Tool | What it does |
 | --- | --- |
-| Merge | Combine any number of PDFs and images into one document. Reorder by dragging pages, or right-click → *Move to position…* to type a page number. Select several pages first to move them as a block. |
-| Split | Cut the document at as many points as you like, all at once. Each part is saved as `<name> cut 1.pdf`, `<name> cut 2.pdf`, … , bundled into a zip when there are several. |
+| Merge | Combine any number of PDFs and images into one document. Reorder by dragging pages, or right-click → *Move to position…* to type a page number. Select several pages first to move them as a block. Switch to the **Files** view to see one cover per file and drag whole files past each other. |
+| Split | Cut the document at as many points as you like, all at once. Every cut shows up in the grid as a red dashed line with scissors: **drag the scissors to move a cut, click them to remove it.** Each part is saved as `<name> cut 1.pdf`, `<name> cut 2.pdf`, … , bundled into a zip when there are several. |
 | Remove | Take pages out. They go to a **Removed pages** list in the panel and can be put back at their original position, individually or all at once. |
 | Rotate | Quarter turns in either direction, or any angle, on all pages or a range. |
 | Crop | Drag a frame on the page, then apply it to that page, a range, or everything. |
@@ -107,6 +107,30 @@ These are limits worth knowing before you rely on the tool, not bugs:
   permission the first time you use it, and captures the page as a fresh tab sees
   it — so pages behind a login may render logged out.
 
+## Publishing
+
+```bash
+npm run package
+```
+
+Builds `dist/pdf-toolbox-<version>.zip` for the Chrome Web Store — which Brave
+installs from too. **[STORE.md](STORE.md)** has the listing copy, the permission
+justifications reviewers ask for, and the steps. The submission itself needs a
+Google account and a one-time \$5 developer fee, so that part is yours to do.
+
+Until it is in the store, *Load unpacked* works on every machine and survives
+restarts.
+
+## Contributing
+
+Issues and pull requests are welcome. Two things worth knowing before you change
+anything that touches the page:
+
+- **Run the tests** (`npm run dev`, then <http://localhost:5175/tests/>). They
+  are round-trip tests for a reason — see below.
+- **All coordinate maths lives in `app/core/geometry.js`.** If you find yourself
+  writing a rotation or an offset anywhere else, that is the bug.
+
 ## Development
 
 ```bash
@@ -160,7 +184,13 @@ override. Merge, split, remove and reorder are then just operations on one array
 which is why they compose instead of each needing its own pipeline, and why undo
 only has to snapshot that array rather than any file bytes.
 
-## Licences
+## Privacy
 
-The vendored libraries keep their own licences: pdf-lib (MIT), pdf.js (Apache
-2.0), JSZip (MIT), TensorFlow.js (Apache 2.0), ESRGAN-slim via UpscalerJS (MIT).
+Nothing is uploaded, there is no account, and there is no analytics or
+telemetry. See [PRIVACY.md](PRIVACY.md).
+
+## Licence
+
+MIT — see [LICENSE](LICENSE). The vendored libraries keep their own: pdf-lib
+(MIT), pdf.js (Apache 2.0), JSZip (MIT), TensorFlow.js (Apache 2.0), ESRGAN-slim
+via UpscalerJS (MIT).

@@ -2,7 +2,7 @@
 import { h, clear } from '../util/dom.js';
 import {
   section, field, hint, button, primary, buttonRow, rangeField, numberInput,
-  slider, checkbox, textInput, select,
+  slider, checkbox, select,
 } from '../ui/controls.js';
 import { parseRange, formatRange } from '../util/ranges.js';
 import { buildPdf } from '../core/export.js';
@@ -108,45 +108,45 @@ const split = {
   icon: 'M8 3v6a2 2 0 0 1-2 2H3 M16 3v6a2 2 0 0 0 2 2h3 M8 21v-6a2 2 0 0 0-2-2H3 M16 21v-6a2 2 0 0 1 2-2h3 M12 2v20',
   blurb: 'Cut the document into several files. Add as many cut points as you like — they are all applied at once.',
   panel(ctx) {
-    const cutsInput = textInput({ placeholder: 'e.g. 3, 7, 12' });
+    const cutsInput = rangeField({ value: '' });
+    const cutsField = field('Cut after page', cutsInput, 'One or more page numbers. “3, 7” makes three files.');
     const preview = h('div.partlist');
     const everyN = numberInput({ value: 1, min: 1, max: 999 });
     const zipToggle = checkbox({ label: 'Bundle the parts into a .zip', checked: true });
 
-    // The page context menu writes into this field, which is why it lives on ctx.
-    ctx.app.splitCutsInput = cutsInput;
+    // The cuts live on the workspace so the grid can draw them and the user can
+    // drag them there. This field is a second view onto the same state, so it
+    // has to push changes out and pull them back in.
+    let syncing = false;
 
-    const parts = () => {
-      const count = ctx.ws.pageCount;
-      const { pages: cuts, error } = cutsInput.value.trim()
-        ? parseRange(cutsInput.value, Math.max(1, count - 1))
+    const pushToWorkspace = () => {
+      const { pages, error } = cutsInput.value.trim()
+        ? parseRange(cutsInput.value, Math.max(1, ctx.ws.pageCount - 1))
         : { pages: [], error: null };
-      if (error) return { error };
+      cutsInput.setError(error);
+      if (error) return;
+      syncing = true;
+      ctx.ws.setCuts(pages);
+      syncing = false;
+      renderPreview();
+    };
 
-      const bounds = [...new Set(cuts)].sort((a, b) => a - b);
-      const ranges = [];
-      let start = 1;
-      for (const cut of bounds) {
-        ranges.push([start, cut]);
-        start = cut + 1;
-      }
-      if (start <= count) ranges.push([start, count]);
-      return { ranges: ranges.filter(([a, b]) => b >= a) };
+    const pullFromWorkspace = () => {
+      if (syncing) return;
+      cutsInput.value = formatRange(ctx.ws.cutList());
+      cutsInput.setError(null);
+      renderPreview();
     };
 
     const renderPreview = () => {
       clear(preview);
-      const result = parts();
-      if (result.error) {
-        preview.appendChild(h('p.field__error', result.error));
-        return;
-      }
-      if (result.ranges.length < 2) {
+      const ranges = ctx.ws.splitRanges();
+      if (ranges.length < 2) {
         preview.appendChild(hint('Add at least one cut point to split the document.'));
         return;
       }
       const base = baseName(ctx.ws.name);
-      result.ranges.forEach(([from, to], index) => {
+      ranges.forEach(([from, to], index) => {
         preview.appendChild(h('div.partrow',
           h('span.partrow__name', `${base} cut ${index + 1}.pdf`),
           h('span.partrow__meta', from === to ? `page ${from}` : `pages ${from}–${to}`),
@@ -154,24 +154,24 @@ const split = {
       });
     };
 
-    cutsInput.addEventListener('input', renderPreview);
-    ctx.onClose(ctx.ws.on('pages', renderPreview));
-    renderPreview();
+    cutsInput.addEventListener('input', pushToWorkspace);
+    ctx.onClose(ctx.ws.on('cuts', pullFromWorkspace));
+    ctx.onClose(ctx.ws.on('pages', pullFromWorkspace));
+    pullFromWorkspace();
 
     const applyEveryN = () => {
       const n = Math.max(1, everyN.valueAsNumber || 1);
       const cuts = [];
       for (let i = n; i < ctx.ws.pageCount; i += n) cuts.push(i);
-      cutsInput.value = formatRange(cuts);
-      renderPreview();
+      ctx.ws.setCuts(cuts);
     };
 
     const run = async () => {
-      const result = parts();
-      if (result.error) return toast(result.error, { tone: 'error' });
-      if (!result.ranges || result.ranges.length < 2) {
+      const ranges = ctx.ws.splitRanges();
+      if (ranges.length < 2) {
         return toast('Add at least one cut point first', { tone: 'error' });
       }
+      const result = { ranges };
 
       const base = baseName(ctx.ws.name);
       const progress = progressToast('Splitting…');
@@ -196,12 +196,13 @@ const split = {
 
     return h('div',
       section('Cut points',
-        field('Cut after page', cutsInput, 'One or more page numbers. “3, 7” makes three files.'),
+        cutsField,
         h('div.inline',
           hint('Or cut every'), everyN, hint('pages'),
           button('Apply', { onclick: applyEveryN }),
         ),
-        hint('Tip: right-click a page in the grid and choose “Split after this page”.'),
+        buttonRow(button('Clear all cuts', { onclick: () => ctx.ws.setCuts([]) })),
+        hint('Each cut shows up as a red line with scissors between the pages. Drag the scissors to move a cut, click them to remove it. You can also right-click any page to split after it.'),
       ),
       section('Result', preview, zipToggle),
       section(null, buttonRow(primary('Split & save', { onclick: run }))),

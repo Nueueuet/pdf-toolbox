@@ -1,6 +1,11 @@
 /**
- * The page grid: thumbnails, selection, drag-and-drop reordering and the
- * right-click menu. This is the surface every organise-style tool acts on.
+ * The page grid: thumbnails, selection, drag-and-drop reordering, split marks
+ * and the right-click menu. This is the surface every organise-style tool acts
+ * on.
+ *
+ * Two views share the grid:
+ *   pages  every page as its own card, with split marks sitting in the gaps
+ *   files  one cover per imported file, so whole files can be reordered
  */
 import { h, clear } from '../util/dom.js';
 import { renderPageCanvas } from '../core/render.js';
@@ -27,10 +32,12 @@ export class PageGrid {
     this.active = 0;
     this.lastClickedId = null;
     this.dragIds = null;
+    this.dragCut = null; // { from, to } while a split mark is being dragged
 
     root.addEventListener('click', (event) => {
-      if (event.target === root || event.target.classList.contains('grid__group')) this.clearSelection();
+      if (event.target === root || event.target.classList.contains('grid__cards')) this.clearSelection();
     });
+    ws.on('cuts', () => this.syncCutMarks());
   }
 
   setZoom(zoom) {
@@ -62,6 +69,10 @@ export class PageGrid {
     for (const card of this.root.querySelectorAll('.pcard')) {
       card.classList.toggle('is-selected', this.ws.selection.has(card.dataset.id));
     }
+    for (const card of this.root.querySelectorAll('.filecard')) {
+      const pages = this.ws.pages.filter((p) => p.srcId === card.dataset.src);
+      card.classList.toggle('is-selected', pages.length > 0 && pages.every((p) => this.ws.selection.has(p.id)));
+    }
   }
 
   render() {
@@ -71,42 +82,20 @@ export class PageGrid {
 
     if (this.ws.pages.length === 0) return;
 
+    const cards = h('div.grid__cards', { class: this.view === 'files' ? 'grid__cards--files' : '' });
     if (this.view === 'files') {
-      let current = null;
-      let group = null;
-      for (const [index, page] of this.ws.pages.entries()) {
-        if (page.srcId !== current) {
-          current = page.srcId;
-          const source = this.ws.source(page);
-          group = h('div.grid__group',
-            h('h4.grid__grouptitle',
-              h('span', source?.name ?? 'Unknown file'),
-              h('button.linkbtn', {
-                type: 'button',
-                onclick: () => this.selectSource(current),
-              }, 'Select all'),
-            ),
-            h('div.grid__cards'),
-          );
-          this.root.appendChild(group);
-        }
-        group.querySelector('.grid__cards').appendChild(this.card(page, index));
-      }
+      for (const group of this.ws.fileGroups()) cards.appendChild(this.fileCard(group));
     } else {
-      const cards = h('div.grid__cards');
       for (const [index, page] of this.ws.pages.entries()) cards.appendChild(this.card(page, index));
-      this.root.appendChild(cards);
     }
+    this.root.appendChild(cards);
 
     this.root.scrollTop = scroll;
+    if (this.view === 'pages') this.syncCutMarks();
     this.pump();
   }
 
-  selectSource(srcId) {
-    for (const page of this.ws.pages) if (page.srcId === srcId) this.ws.selection.add(page.id);
-    this.ws.emit('selection');
-    this.syncSelection();
-  }
+  // ------------------------------------------------------------- page cards
 
   card(page, index) {
     const { w, h: ph } = pageSize(page);
@@ -140,10 +129,176 @@ export class PageGrid {
     return card;
   }
 
+  // ------------------------------------------------------------- file cards
+
+  fileCard(group) {
+    const cover = group.pages[0];
+    const { w, h: ph } = pageSize(cover);
+    const shell = h('div.pcard__shell', { style: { aspectRatio: `${w} / ${ph}` } });
+    const count = group.pages.length;
+
+    const card = h('div.filecard', {
+      dataset: { src: group.srcId },
+      draggable: 'true',
+      tabindex: '0',
+      title: group.source?.name ?? '',
+    },
+      h('div.pcard__frame', shell,
+        h('span.filecard__count', `${count} ${count === 1 ? 'page' : 'pages'}`),
+      ),
+      h('div.filecard__name', group.source?.name ?? 'Unknown file'),
+    );
+
+    card.addEventListener('click', () => {
+      // Selecting a cover selects the whole file, which is what the page tools
+      // then act on when the user switches back to the Pages view.
+      const all = group.pages.every((p) => this.ws.selection.has(p.id));
+      for (const page of group.pages) {
+        if (all) this.ws.selection.delete(page.id);
+        else this.ws.selection.add(page.id);
+      }
+      this.ws.emit('selection');
+      this.syncSelection();
+    });
+    card.addEventListener('dblclick', () => this.handlers.onOpenPage(cover));
+    card.addEventListener('dragstart', (event) => {
+      this.dragSrcId = group.srcId;
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', group.srcId);
+      requestAnimationFrame(() => this.root.classList.add('is-dragging'));
+    });
+    card.addEventListener('dragend', () => this.onDragEnd());
+    card.addEventListener('dragover', (event) => {
+      if (!this.dragSrcId) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      const rect = card.getBoundingClientRect();
+      const after = event.clientX > rect.left + rect.width / 2;
+      this.clearDropHints();
+      card.classList.add(after ? 'is-dropafter' : 'is-dropbefore');
+    });
+    card.addEventListener('drop', (event) => {
+      if (!this.dragSrcId) return;
+      event.preventDefault();
+      const rect = card.getBoundingClientRect();
+      const after = event.clientX > rect.left + rect.width / 2;
+      this.handlers.onCommand('move-file', { srcId: this.dragSrcId, targetSrcId: group.srcId, after });
+      this.onDragEnd();
+    });
+
+    this.queue.push({ page: cover, shell });
+    return card;
+  }
+
+  // -------------------------------------------------------------- split cuts
+
+  /**
+   * Draws the split marks into the gaps between cards. Kept separate from
+   * `render` so dragging a mark does not rebuild every thumbnail.
+   */
+  syncCutMarks() {
+    if (this.view !== 'pages') return;
+    for (const mark of this.root.querySelectorAll('.cutmark')) mark.remove();
+
+    const shown = new Set(this.ws.cutList());
+    if (this.dragCut) {
+      shown.delete(this.dragCut.from);
+      shown.add(this.dragCut.to);
+    }
+
+    for (const afterPage of shown) {
+      const card = this.root.querySelector(`.pcard[data-index="${afterPage - 1}"]`);
+      if (card) card.appendChild(this.cutMark(afterPage));
+    }
+  }
+
+  cutMark(afterPage) {
+    const grip = h('button.cutmark__grip', {
+      type: 'button',
+      title: 'Drag to move this split · click to remove it',
+      'aria-label': `Split after page ${afterPage}`,
+    }, scissorsIcon());
+
+    const mark = h('div.cutmark', { dataset: { after: String(afterPage) } },
+      h('span.cutmark__line'), grip);
+
+    grip.addEventListener('click', (event) => {
+      event.stopPropagation();
+      if (this.suppressCutClick) return; // the click that ends a drag
+      this.handlers.onCommand('toggle-cut', { afterPage });
+    });
+    grip.addEventListener('pointerdown', (event) => this.onCutPointerDown(event, afterPage));
+
+    return mark;
+  }
+
+  onCutPointerDown(event, afterPage) {
+    event.preventDefault();
+    event.stopPropagation();
+    this.suppressCutClick = false;
+    let moved = false;
+
+    const onMove = (move) => {
+      const target = this.gapUnder(move.clientX, move.clientY);
+      if (target == null) return;
+      moved = true;
+      if (this.dragCut?.to === target) return;
+      this.dragCut = { from: afterPage, to: target };
+      this.root.classList.add('is-cutdragging');
+      this.syncCutMarks();
+    };
+
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      this.root.classList.remove('is-cutdragging');
+      const drag = this.dragCut;
+      this.dragCut = null;
+      if (moved && drag && drag.to !== drag.from) {
+        this.suppressCutClick = true;
+        setTimeout(() => { this.suppressCutClick = false; }, 0);
+        this.handlers.onCommand('move-cut', { from: drag.from, to: drag.to });
+      } else {
+        this.syncCutMarks();
+      }
+    };
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  }
+
+  /** Which gap (as "cut after page N") the cursor is currently nearest to. */
+  gapUnder(clientX, clientY) {
+    const card = document.elementFromPoint(clientX, clientY)?.closest?.('.pcard')
+      ?? this.nearestCard(clientX, clientY);
+    if (!card) return null;
+    const index = Number(card.dataset.index);
+    const rect = card.getBoundingClientRect();
+    const after = clientX > rect.left + rect.width / 2;
+    const target = after ? index + 1 : index;
+    return Math.min(this.ws.pageCount - 1, Math.max(1, target));
+  }
+
+  nearestCard(clientX, clientY) {
+    let best = null;
+    let bestDistance = Infinity;
+    for (const card of this.root.querySelectorAll('.pcard')) {
+      const rect = card.getBoundingClientRect();
+      const dx = Math.max(rect.left - clientX, 0, clientX - rect.right);
+      const dy = Math.max(rect.top - clientY, 0, clientY - rect.bottom);
+      const distance = Math.hypot(dx, dy);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = card;
+      }
+    }
+    return best;
+  }
+
   // ------------------------------------------------------------- interactions
 
   onCardClick(event, page) {
-    if (event.target.closest('.pcard__tools')) return;
+    if (event.target.closest('.pcard__tools') || event.target.closest('.cutmark')) return;
     const selection = this.ws.selection;
 
     if (event.shiftKey && this.lastClickedId) {
@@ -178,6 +333,9 @@ export class PageGrid {
     }
     const pages = this.ws.targetPages();
     const count = pages.length;
+    const index = this.ws.indexOf(page.id);
+    const hasCut = this.ws.cuts.has(index + 1);
+    const canCut = index + 1 < this.ws.pageCount;
 
     contextMenu(event, [
       { label: count > 1 ? `Move ${count} pages to position…` : 'Move to position…', onClick: () => this.promptMove(page) },
@@ -187,7 +345,11 @@ export class PageGrid {
       { label: 'Rotate right', onClick: () => this.handlers.onCommand('rotate', { pages, delta: 90 }) },
       { label: 'Duplicate', onClick: () => this.handlers.onCommand('duplicate', { pages }) },
       { separator: true },
-      { label: 'Split after this page', onClick: () => this.handlers.onCommand('split-here', { page }) },
+      {
+        label: hasCut ? 'Remove split after this page' : 'Split after this page',
+        disabled: !canCut,
+        onClick: () => this.handlers.onCommand('toggle-cut', { afterPage: index + 1 }),
+      },
       { label: count > 1 ? `Remove ${count} pages` : 'Remove page', danger: true, onClick: () => this.handlers.onCommand('remove', { pages }) },
     ]);
   }
@@ -223,7 +385,12 @@ export class PageGrid {
 
   onDragEnd() {
     this.dragIds = null;
+    this.dragSrcId = null;
     this.root.classList.remove('is-dragging');
+    this.clearDropHints();
+  }
+
+  clearDropHints() {
     for (const el of this.root.querySelectorAll('.is-dropbefore, .is-dropafter')) {
       el.classList.remove('is-dropbefore', 'is-dropafter');
     }
@@ -235,9 +402,7 @@ export class PageGrid {
     event.dataTransfer.dropEffect = 'move';
     const rect = card.getBoundingClientRect();
     const after = event.clientX > rect.left + rect.width / 2;
-    for (const el of this.root.querySelectorAll('.is-dropbefore, .is-dropafter')) {
-      el.classList.remove('is-dropbefore', 'is-dropafter');
-    }
+    this.clearDropHints();
     card.classList.add(after ? 'is-dropafter' : 'is-dropbefore');
   }
 
@@ -309,17 +474,33 @@ function cloneCanvas(source) {
   return copy;
 }
 
-function iconBtn(title, path, onclick) {
+function svgIcon(paths, strokeWidth = 1.8) {
   const ns = 'http://www.w3.org/2000/svg';
   const svg = document.createElementNS(ns, 'svg');
   svg.setAttribute('viewBox', '0 0 24 24');
   svg.setAttribute('fill', 'none');
   svg.setAttribute('stroke', 'currentColor');
-  svg.setAttribute('stroke-width', '1.8');
+  svg.setAttribute('stroke-width', String(strokeWidth));
   svg.setAttribute('stroke-linecap', 'round');
   svg.setAttribute('stroke-linejoin', 'round');
-  const p = document.createElementNS(ns, 'path');
-  p.setAttribute('d', path);
-  svg.appendChild(p);
-  return h('button.pcard__tool', { type: 'button', title, 'aria-label': title, onclick }, svg);
+  for (const d of [].concat(paths)) {
+    const p = document.createElementNS(ns, 'path');
+    p.setAttribute('d', d);
+    svg.appendChild(p);
+  }
+  return svg;
+}
+
+function scissorsIcon() {
+  return svgIcon([
+    'M6 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z',
+    'M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z',
+    'M20 4 8.12 15.88',
+    'M14.47 14.48 20 20',
+    'M8.12 8.12 12 12',
+  ], 1.9);
+}
+
+function iconBtn(title, path, onclick) {
+  return h('button.pcard__tool', { type: 'button', title, 'aria-label': title, onclick }, svgIcon(path));
 }

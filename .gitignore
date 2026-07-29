@@ -4,8 +4,12 @@ vendor/
 # Generated samples for the test suite.
 test-files/
 
+# Store packages built by `npm run package`.
+dist/
+
 # Scratch directories used while unpacking npm tarballs.
 .vendor-tmp/
 .ai-tmp/
+.package-tmp/
 
 node_modules/

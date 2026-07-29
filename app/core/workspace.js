@@ -29,6 +29,13 @@ export class Workspace extends EventTarget {
     this.selection = new Set();
     /** @type {Map<string, RasterEntry>} */
     this.rasters = new Map();
+    /**
+     * Split points, as 1-based page numbers meaning "cut *after* this page".
+     * They live here rather than inside the Split panel so the page grid can
+     * draw them and let the user drag them straight on the pages.
+     * @type {Set<number>}
+     */
+    this.cuts = new Set();
     this.name = 'document';
 
     this.history = [];
@@ -142,6 +149,7 @@ export class Workspace extends EventTarget {
     return {
       pages: this.pages.map(clonePage),
       removed: this.removed.map(clonePage),
+      cuts: [...this.cuts],
       name: this.name,
     };
   }
@@ -149,6 +157,7 @@ export class Workspace extends EventTarget {
   #applyState(state) {
     this.pages = state.pages.map(clonePage);
     this.removed = state.removed.map(clonePage);
+    this.cuts = new Set(state.cuts ?? []);
     this.name = state.name;
     // Selection may reference pages that no longer exist.
     const live = new Set(this.pages.map((p) => p.id));
@@ -253,6 +262,82 @@ export class Workspace extends EventTarget {
     this.pages = [...rest.slice(0, at), ...moving, ...rest.slice(at)];
   }
 
+  // --------------------------------------------------------------- split cuts
+
+  /** Cut points that still fall inside the document, in order. */
+  cutList() {
+    return [...this.cuts].filter((n) => n >= 1 && n < this.pageCount).sort((a, b) => a - b);
+  }
+
+  setCuts(numbers) {
+    this.cuts = new Set(numbers.filter((n) => n >= 1 && n < this.pageCount));
+    this.emit('cuts');
+  }
+
+  toggleCut(afterPage) {
+    if (afterPage < 1 || afterPage >= this.pageCount) return;
+    if (this.cuts.has(afterPage)) this.cuts.delete(afterPage);
+    else this.cuts.add(afterPage);
+    this.emit('cuts');
+  }
+
+  moveCut(from, to) {
+    if (from === to || !this.cuts.has(from)) return;
+    if (to < 1 || to >= this.pageCount) return;
+    this.cuts.delete(from);
+    this.cuts.add(to);
+    this.emit('cuts');
+  }
+
+  /** The page ranges the cuts describe, as [from, to] pairs (1-based, inclusive). */
+  splitRanges() {
+    const ranges = [];
+    let start = 1;
+    for (const cut of this.cutList()) {
+      ranges.push([start, cut]);
+      start = cut + 1;
+    }
+    if (start <= this.pageCount) ranges.push([start, this.pageCount]);
+    return ranges;
+  }
+
+  // ---------------------------------------------------------------- files
+
+  /**
+   * Pages grouped by the file they came from, ordered by where each file first
+   * appears. Backs the Files view, which shows one cover per file.
+   */
+  fileGroups() {
+    const groups = new Map();
+    for (const page of this.pages) {
+      if (!groups.has(page.srcId)) {
+        groups.set(page.srcId, { srcId: page.srcId, source: this.sources.get(page.srcId), pages: [] });
+      }
+      groups.get(page.srcId).pages.push(page);
+    }
+    return [...groups.values()];
+  }
+
+  /**
+   * Moves every page of one file, as a block, to sit before or after another
+   * file. Pages of a file need not be contiguous after page-level edits, so the
+   * block is gathered first and re-inserted in one piece.
+   */
+  moveFile(srcId, targetSrcId, after = false) {
+    if (srcId === targetSrcId) return;
+    const moving = this.pages.filter((p) => p.srcId === srcId);
+    if (moving.length === 0) return;
+
+    const rest = this.pages.filter((p) => p.srcId !== srcId);
+    const targetIndexes = rest
+      .map((p, i) => (p.srcId === targetSrcId ? i : -1))
+      .filter((i) => i >= 0);
+    if (targetIndexes.length === 0) return;
+
+    const at = after ? targetIndexes[targetIndexes.length - 1] + 1 : targetIndexes[0];
+    this.pages = [...rest.slice(0, at), ...moving, ...rest.slice(at)];
+  }
+
   // ------------------------------------------------------------------ rasters
 
   putRaster(entry) {
@@ -288,6 +373,7 @@ export class Workspace extends EventTarget {
     this.sources.clear();
     this.pages = [];
     this.removed = [];
+    this.cuts.clear();
     this.selection.clear();
     this.history = [];
     this.future = [];

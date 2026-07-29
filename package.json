@@ -11,6 +11,7 @@
     "test-files": "node scripts/make-test-pdfs.mjs",
     "dev": "node scripts/dev-server.mjs",
     "check": "node scripts/check.mjs",
+    "package": "node scripts/check.mjs && node scripts/package.mjs",
     "setup": "npm run vendor && npm run icons && npm run check"
   }
 }

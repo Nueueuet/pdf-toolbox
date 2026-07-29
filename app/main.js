@@ -425,17 +425,20 @@ class App {
         });
         break;
       }
-      case 'split-here': {
-        this.selectTool('split');
-        const input = this.splitCutsInput;
-        if (input) {
-          const cut = this.ws.indexOf(payload.page.id) + 1;
-          const existing = input.value.trim();
-          input.value = existing ? `${existing}, ${cut}` : String(cut);
-          input.dispatchEvent(new Event('input'));
-        }
+      // Cuts are editing intent rather than document content, so they do not go
+      // through commit — undoing a split is just clicking the mark again.
+      case 'toggle-cut':
+        this.ws.toggleCut(payload.afterPage);
+        if (this.ws.cuts.size > 0 && this.activeToolId !== 'split') this.selectTool('split');
         break;
-      }
+      case 'move-cut':
+        this.ws.moveCut(payload.from, payload.to);
+        break;
+      case 'move-file':
+        this.ws.commit('Reorder files', () => {
+          this.ws.moveFile(payload.srcId, payload.targetSrcId, payload.after);
+        });
+        break;
       default:
         console.warn('unknown grid command', name);
     }

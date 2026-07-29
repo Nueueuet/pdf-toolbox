@@ -306,16 +306,62 @@ button { font: inherit; }
   align-items: start;
 }
 
-.grid__group { margin-bottom: 26px; }
-
-.grid__grouptitle {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 0 0 12px;
-  font-size: 13px;
-  color: var(--ink-soft);
+/* Files view: one cover per file, so whole files can be dragged around. */
+.grid__cards--files {
+  grid-template-columns: repeat(auto-fill, minmax(calc(var(--thumb-width) + 20px), 1fr));
 }
+
+.filecard {
+  position: relative;
+  cursor: grab;
+  border-radius: var(--radius);
+  outline: none;
+}
+
+.filecard:hover .pcard__frame { box-shadow: var(--shadow-md); }
+.filecard:focus-visible .pcard__frame { border-color: var(--blue); }
+
+.filecard.is-selected .pcard__frame {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 2px var(--blue-soft), var(--shadow-md);
+}
+
+/* The stacked-paper edge that says "this stands for a whole file". */
+.filecard .pcard__frame::after {
+  content: "";
+  position: absolute;
+  inset: 6px -5px -5px 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  box-shadow: var(--shadow-sm);
+  z-index: -1;
+}
+
+.filecard__count {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(22, 32, 42, .78);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.filecard__name {
+  margin-top: 12px;
+  padding: 0 4px;
+  text-align: center;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.filecard.is-dropbefore .pcard__frame { box-shadow: -3px 0 0 var(--blue), var(--shadow-md); }
+.filecard.is-dropafter .pcard__frame { box-shadow: 3px 0 0 var(--blue), var(--shadow-md); }
 
 .pcard {
   position: relative;
@@ -421,6 +467,68 @@ button { font: inherit; }
 .pcard__tool svg { width: 15px; height: 15px; }
 .pcard__tool:hover { background: var(--line-soft); color: var(--ink); }
 .pcard__tool:last-child:hover { background: var(--danger-soft); color: var(--danger); }
+
+/* ------------------------------------------------------------- split marks */
+
+/*
+ * A split sits in the gap after a page, so it is anchored to that card and
+ * reaches into the gutter. Drawn on top of everything else in the grid because
+ * the whole point is that it should be impossible to miss.
+ */
+.cutmark {
+  position: absolute;
+  top: 0;
+  bottom: 30px;
+  right: -12px;
+  width: 24px;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  cursor: grab;
+}
+
+.cutmark__line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 11px;
+  width: 2px;
+  border-radius: 2px;
+  background: repeating-linear-gradient(
+    to bottom,
+    var(--danger) 0 6px,
+    transparent 6px 11px
+  );
+}
+
+.cutmark__grip {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--danger);
+  border-radius: 50%;
+  background: #fff;
+  color: var(--danger);
+  cursor: grab;
+  box-shadow: var(--shadow-sm);
+  transition: transform .12s, background .12s;
+}
+
+.cutmark__grip svg { width: 13px; height: 13px; }
+
+.cutmark__grip:hover {
+  background: var(--danger);
+  color: #fff;
+  transform: scale(1.12);
+}
+
+.cutmark__grip:active { cursor: grabbing; }
+
+.grid.is-cutdragging { cursor: grabbing; }
+.grid.is-cutdragging .cutmark__grip { background: var(--danger); color: #fff; }
 
 .grid.is-dragging .pcard { cursor: grabbing; }
 

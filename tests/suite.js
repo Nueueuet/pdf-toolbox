@@ -200,6 +200,44 @@ test('merging keeps every page and the chosen order', async () => {
   assert(out.numPages === 4, `merged file had ${out.numPages} pages`);
 });
 
+test('cut points describe the parts they will produce', async () => {
+  const ws = await loadWorkspace(['report.pdf']);
+  ws.setCuts([2, 4]);
+  assert(JSON.stringify(ws.splitRanges()) === JSON.stringify([[1, 2], [3, 4], [5, 5]]),
+    `ranges wrong: ${JSON.stringify(ws.splitRanges())}`);
+
+  ws.moveCut(2, 3);
+  assert(ws.cutList().join() === '3,4', `move wrong: ${ws.cutList()}`);
+
+  ws.toggleCut(3);
+  assert(ws.cutList().join() === '4', `toggle off wrong: ${ws.cutList()}`);
+
+  // A cut after the last page would produce an empty part, so it is ignored.
+  ws.setCuts([1, 5, 99]);
+  assert(ws.cutList().join() === '1', `out-of-range cuts kept: ${ws.cutList()}`);
+});
+
+test('reordering a file moves all of its pages as a block', async () => {
+  const ws = await loadWorkspace(['invoice.pdf', 'appendix.pdf']);
+  const groups = ws.fileGroups();
+  assert(groups.length === 2, `expected 2 files, got ${groups.length}`);
+  assert(groups[0].pages.length === 2 && groups[1].pages.length === 2, 'wrong page counts');
+
+  ws.moveFile(groups[1].srcId, groups[0].srcId, false);
+  const names = ws.pages.map((p) => ws.source(p).name);
+  assert(names.join() === 'appendix.pdf,appendix.pdf,invoice.pdf,invoice.pdf',
+    `page order after move: ${names.join()}`);
+
+  // Interleave the files, then move again: the block must still gather cleanly.
+  ws.moveTo([ws.pages[3].id], 1);
+  const beforeCount = ws.pageCount;
+  ws.moveFile(ws.fileGroups()[1].srcId, ws.fileGroups()[0].srcId, true);
+  assert(ws.pageCount === beforeCount, 'moving a file lost pages');
+  const grouped = ws.fileGroups();
+  assert(grouped.length === 2 && grouped.every((g) => g.pages.length === 2),
+    'file grouping broke after an interleaved move');
+});
+
 test('a tilted watermark lands where the preview puts it', async () => {
   const ws = await loadWorkspace(['mixed-pages.pdf']);
   // The annotation's own tilt and the page rotation have opposite signs, so a
