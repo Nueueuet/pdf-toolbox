@@ -21,9 +21,14 @@ let manifestPromise = null;
 let tfPromise = null;
 const modelCache = new Map(); // scale -> loaded tf.LayersModel
 
+/**
+ * The model index. Named models.json rather than manifest.json because the
+ * Chrome Web Store treats *any* manifest.json in the package as an extension
+ * manifest and rejects uploads that contain more than one.
+ */
 function loadManifest() {
   if (!manifestPromise) {
-    manifestPromise = fetch(assetUrl('vendor/ai/manifest.json'))
+    manifestPromise = fetch(assetUrl('vendor/ai/models.json'))
       .then((response) => (response.ok ? response.json() : null))
       .catch(() => null);
   }

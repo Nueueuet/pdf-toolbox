@@ -48,6 +48,23 @@ async function walk(dir) {
   return out;
 }
 
+/** Every file under `dir`, whatever its extension. Returns [] if it is missing. */
+async function walkAll(dir) {
+  const out = [];
+  let entries;
+  try {
+    entries = await readdir(path.join(root, dir), { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const entry of entries) {
+    const relative = `${dir}/${entry.name}`;
+    if (entry.isDirectory()) out.push(...(await walkAll(relative)));
+    else out.push(relative);
+  }
+  return out;
+}
+
 const sources = [...(await walk('app')), ...(await walk('background')), ...(await walk('tests'))];
 const IMPORT = /(?:^|\n)\s*(?:import|export)[\s\S]*?from\s+['"]([^'"]+)['"]/g;
 
@@ -87,7 +104,13 @@ for (const page of ['app/index.html', 'tests/index.html']) {
 for (const file of ['vendor/pdf-lib.esm.js', 'vendor/pdf.mjs', 'vendor/pdf.worker.mjs', 'vendor/jszip.js']) {
   if (!(await exists(file))) note(`missing ${file} — run "npm run vendor"`);
 }
-const aiReady = await exists('vendor/ai/manifest.json');
+const aiReady = await exists('vendor/ai/models.json');
+
+// A nested manifest.json makes the Chrome Web Store reject the upload, so flag
+// one as soon as it appears rather than at submission time.
+for (const stray of await walkAll('vendor')) {
+  if (stray.endsWith('/manifest.json')) note(`${stray} would be read as a second extension manifest — rename it`);
+}
 
 // --- report -----------------------------------------------------------------
 if (problems.length === 0) {

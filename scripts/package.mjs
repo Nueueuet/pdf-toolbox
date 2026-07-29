@@ -71,6 +71,31 @@ for (const entry of INCLUDE) {
   await copyInto(path.join(root, entry), path.join(stageDir, entry));
 }
 
+/**
+ * The store scans the whole package for `manifest.json` and refuses an upload
+ * that contains more than one, reading any nested config file of that name as a
+ * second extension manifest. That failure only surfaces after uploading, so
+ * catch it here instead.
+ */
+async function findManifests(dir, base = '') {
+  const found = [];
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    const relative = base ? `${base}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) found.push(...(await findManifests(path.join(dir, entry.name), relative)));
+    else if (entry.name === 'manifest.json') found.push(relative);
+  }
+  return found;
+}
+
+const manifests = await findManifests(stageDir);
+if (manifests.length !== 1 || manifests[0] !== 'manifest.json') {
+  await rm(stageDir, { recursive: true, force: true });
+  console.error('cannot package: the store accepts exactly one manifest.json, found:');
+  for (const entry of manifests) console.error(`  - ${entry}`);
+  console.error('rename the nested one (see scripts/fetch-ai.mjs)');
+  process.exit(1);
+}
+
 const aiIncluded = await stat(path.join(stageDir, 'vendor', 'ai')).then(() => true).catch(() => false);
 const zipName = `pdf-toolbox-${manifest.version}.zip`;
 const zipPath = path.join(outDir, zipName);

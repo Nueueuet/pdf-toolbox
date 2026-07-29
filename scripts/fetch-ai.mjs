@@ -58,7 +58,10 @@ for (const scale of SCALES) {
 }
 console.log(`  ok  @upscalerjs/esrgan-slim@${esrgan.version} (x${SCALES.join(', x')})`);
 
-await writeFile(path.join(aiDir, 'manifest.json'), `${JSON.stringify({
+// Deliberately not called manifest.json: the Chrome Web Store scans the whole
+// package for that filename and rejects an upload that contains more than one,
+// reading a nested config file as a second extension manifest.
+await writeFile(path.join(aiDir, 'models.json'), `${JSON.stringify({
   tfjs: 'vendor/ai/tf.min.js',
   tfjsVersion: tfjs.version,
   modelName: 'ESRGAN-slim (RDN)',
@@ -70,4 +73,4 @@ await writeFile(path.join(aiDir, 'manifest.json'), `${JSON.stringify({
 }, null, 2)}\n`);
 
 await rm(tmpDir, { recursive: true, force: true });
-console.log('  ok  vendor/ai/manifest.json — reload the extension to enable AI upscaling');
+console.log('  ok  vendor/ai/models.json — reload the extension to enable AI upscaling');
