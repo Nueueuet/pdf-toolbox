@@ -202,7 +202,7 @@ const split = {
           button('Apply', { onclick: applyEveryN }),
         ),
         buttonRow(button('Clear all cuts', { onclick: () => ctx.ws.setCuts([]) })),
-        hint('Each cut shows up as a red line with scissors between the pages. Drag the scissors to move a cut, click them to remove it. You can also right-click any page to split after it.'),
+        hint('Click between two pages to cut there. Click the scissors again to remove that cut, or drag them to another gap to move it. While this tool is open, every possible cut position is marked.'),
       ),
       section('Result', preview, zipToggle),
       section(null, buttonRow(primary('Split & save', { onclick: run }))),

@@ -40,7 +40,7 @@ npm run vendor:ai
 | Tool | What it does |
 | --- | --- |
 | Merge | Combine any number of PDFs and images into one document. Reorder by dragging pages, or right-click → *Move to position…* to type a page number. Select several pages first to move them as a block. Switch to the **Files** view to see one cover per file and drag whole files past each other. |
-| Split | Cut the document at as many points as you like, all at once. Every cut shows up in the grid as a red dashed line with scissors: **drag the scissors to move a cut, click them to remove it.** Each part is saved as `<name> cut 1.pdf`, `<name> cut 2.pdf`, … , bundled into a zip when there are several. |
+| Split | Cut the document at as many points as you like, all at once. **Click between two pages to add a cut, click the scissors to remove it, drag them to move it.** Open the Split tool and every possible cut position is shown faintly. Each part is saved as `<name> cut 1.pdf`, `<name> cut 2.pdf`, … , bundled into a zip when there are several. |
 | Remove | Take pages out. They go to a **Removed pages** list in the panel and can be put back at their original position, individually or all at once. |
 | Rotate | Quarter turns in either direction, or any angle, on all pages or a range. |
 | Crop | Drag a frame on the page, then apply it to that page, a range, or everything. |

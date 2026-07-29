@@ -14,6 +14,7 @@ import { pageSize } from '../app/core/workspace.js';
 import { extractRows, toCsv } from '../app/core/text.js';
 import { parseRange, formatRange } from '../app/util/ranges.js';
 import { primeFontMetrics } from '../app/core/fonts.js';
+import { PageGrid } from '../app/ui/pagegrid.js';
 import * as pdfjsLib from '../vendor/pdf.mjs';
 
 const tests = [];
@@ -215,6 +216,70 @@ test('cut points describe the parts they will produce', async () => {
   // A cut after the last page would produce an empty part, so it is ignored.
   ws.setCuts([1, 5, 99]);
   assert(ws.cutList().join() === '1', `out-of-range cuts kept: ${ws.cutList()}`);
+});
+
+test('clicking and dragging the split marks in the grid', async () => {
+  // This one drives the real DOM. The first version of the split marks looked
+  // correct and was still broken: preventDefault on pointerdown, needed to stop
+  // the page card being dragged, also suppresses the click event, so clicking
+  // the scissors did nothing. Only a gesture-level test catches that.
+  const ws = await loadWorkspace(['report.pdf']);
+  const host = document.createElement('div');
+  host.className = 'grid'; // the real class, so the real layout rules apply
+  // Invisible but still hit-testable: gapUnder uses elementFromPoint, and
+  // pointer-events:none here would quietly route the test down a fallback path.
+  host.style.cssText = 'position:fixed;left:0;top:0;width:1200px;height:640px;overflow:hidden;opacity:0;z-index:9999';
+  document.body.appendChild(host);
+
+  const grid = new PageGrid(host, ws, {
+    onOpenPage: () => {},
+    onCommand: (name, payload) => {
+      if (name === 'toggle-cut') ws.toggleCut(payload.afterPage);
+      if (name === 'move-cut') ws.moveCut(payload.from, payload.to);
+    },
+  });
+  grid.setZoom(0.3);
+  grid.render();
+
+  const slot = (n) => host.querySelector(`.cutmark[data-after="${n}"]`);
+  const centre = (el) => {
+    const r = el.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  };
+  const gesture = (el, from, to) => {
+    const base = { bubbles: true, cancelable: true, button: 0, pointerId: 1 };
+    el.dispatchEvent(new PointerEvent('pointerdown', { ...base, clientX: from.x, clientY: from.y }));
+    if (to) window.dispatchEvent(new PointerEvent('pointermove', { ...base, clientX: to.x, clientY: to.y }));
+    const end = to ?? from;
+    window.dispatchEvent(new PointerEvent('pointerup', { ...base, clientX: end.x, clientY: end.y }));
+  };
+
+  try {
+    assert(host.querySelectorAll('.cutmark').length === ws.pageCount - 1,
+      'there should be one slot in every gap');
+
+    gesture(slot(2), centre(slot(2)));
+    assert(ws.cutList().join() === '2', `click on an empty gap did not add a cut: ${ws.cutList()}`);
+    assert(slot(2).classList.contains('is-active'), 'the new cut is not drawn as active');
+
+    gesture(slot(2), centre(slot(2)));
+    assert(ws.cutList().length === 0, `click on the scissors did not remove the cut: ${ws.cutList()}`);
+
+    ws.setCuts([1, 3]);
+    gesture(slot(1), centre(slot(1)), centre(slot(4)));
+    assert(ws.cutList().join() === '3,4', `drag moved the cut wrongly: ${ws.cutList()}`);
+
+    // A couple of pixels of tremor must still read as a click, not a drag.
+    ws.setCuts([2]);
+    const spot = centre(slot(2));
+    gesture(slot(2), spot, { x: spot.x + 2, y: spot.y + 1 });
+    assert(ws.cutList().length === 0, `a shaky click was treated as a drag: ${ws.cutList()}`);
+
+    // Reaching for a gap must never select or move the page underneath.
+    assert(ws.selection.size === 0, 'clicking a gap selected a page');
+  } finally {
+    host.remove();
+  }
 });
 
 test('reordering a file moves all of its pages as a block', async () => {

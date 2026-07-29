@@ -301,6 +301,7 @@ class App {
     this.el.panelTitle.textContent = tool.label;
     this.el.panelBlurb.textContent = tool.blurb;
     this.el.panel.hidden = this.ws.pageCount === 0;
+    this.grid.setSplitHint(id === 'split');
 
     // The surface is switched before the panel is built so that a panel can read
     // the editor's state (selected annotation, crop rectangle) as it renders.

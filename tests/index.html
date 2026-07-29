@@ -3,8 +3,14 @@
 <head>
   <meta charset="utf-8">
   <title>PDF Toolbox — tests</title>
+  <!--
+    The grid tests drive real elements, so they need the real stylesheet: without
+    it the cards have no layout and every split mark collapses onto the same
+    point, which makes a gesture test pass or fail for the wrong reasons.
+  -->
+  <link rel="stylesheet" href="../app/styles.css">
   <style>
-    body { font: 14px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif; margin: 32px; color: #16202a; }
+    body { font: 14px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif; margin: 32px; color: #16202a; background: #fff; height: auto; }
     h1 { font-size: 20px; margin: 0 0 4px; }
     p.sub { color: #5b6b7a; margin: 0 0 20px; }
     ol { padding-left: 0; list-style: none; }

@@ -192,57 +192,76 @@ export class PageGrid {
 
   // -------------------------------------------------------------- split cuts
 
+  /** Highlights every possible cut position, so the Split tool is discoverable. */
+  setSplitHint(on) {
+    this.root.classList.toggle('is-splithint', Boolean(on));
+  }
+
   /**
-   * Draws the split marks into the gaps between cards. Kept separate from
-   * `render` so dragging a mark does not rebuild every thumbnail.
+   * Draws a slot into every gap between pages — one per card except the last.
+   * A slot carrying a cut is drawn in full; an empty one is a click target that
+   * only shows itself on hover. Kept separate from `render` so dragging a cut
+   * does not rebuild every thumbnail.
    */
   syncCutMarks() {
     if (this.view !== 'pages') return;
     for (const mark of this.root.querySelectorAll('.cutmark')) mark.remove();
 
-    const shown = new Set(this.ws.cutList());
+    const active = new Set(this.ws.cutList());
     if (this.dragCut) {
-      shown.delete(this.dragCut.from);
-      shown.add(this.dragCut.to);
+      active.delete(this.dragCut.from);
+      active.add(this.dragCut.to);
     }
 
-    for (const afterPage of shown) {
+    for (let afterPage = 1; afterPage < this.ws.pageCount; afterPage++) {
       const card = this.root.querySelector(`.pcard[data-index="${afterPage - 1}"]`);
-      if (card) card.appendChild(this.cutMark(afterPage));
+      if (card) card.appendChild(this.cutMark(afterPage, active.has(afterPage)));
     }
   }
 
-  cutMark(afterPage) {
-    const grip = h('button.cutmark__grip', {
-      type: 'button',
-      title: 'Drag to move this split · click to remove it',
-      'aria-label': `Split after page ${afterPage}`,
-    }, scissorsIcon());
+  cutMark(afterPage, isActive) {
+    const grip = h('span.cutmark__grip', scissorsIcon());
+    const mark = h(`div.cutmark${isActive ? '.is-active' : ''}`, {
+      dataset: { after: String(afterPage) },
+      draggable: 'false',
+      title: isActive
+        ? 'Drag to move this split · click to remove it'
+        : `Click to split after page ${afterPage}`,
+    }, h('span.cutmark__line'), grip);
 
-    const mark = h('div.cutmark', { dataset: { after: String(afterPage) } },
-      h('span.cutmark__line'), grip);
-
-    grip.addEventListener('click', (event) => {
+    // The card underneath is draggable; a gesture that starts in the gap must
+    // move the split, never the page.
+    mark.addEventListener('dragstart', (event) => {
+      event.preventDefault();
       event.stopPropagation();
-      if (this.suppressCutClick) return; // the click that ends a drag
-      this.handlers.onCommand('toggle-cut', { afterPage });
     });
-    grip.addEventListener('pointerdown', (event) => this.onCutPointerDown(event, afterPage));
+    mark.addEventListener('click', (event) => event.stopPropagation());
+    mark.addEventListener('pointerdown', (event) => this.onCutPointerDown(event, afterPage, isActive));
 
     return mark;
   }
 
-  onCutPointerDown(event, afterPage) {
+  /**
+   * One gesture handles all three actions, because `preventDefault` on
+   * pointerdown (needed to stop the card being dragged) also suppresses the
+   * click event — so click cannot be relied on here.
+   */
+  onCutPointerDown(event, afterPage, isActive) {
+    if (event.button !== 0) return;
     event.preventDefault();
     event.stopPropagation();
-    this.suppressCutClick = false;
+
+    const startX = event.clientX;
+    const startY = event.clientY;
     let moved = false;
 
     const onMove = (move) => {
-      const target = this.gapUnder(move.clientX, move.clientY);
-      if (target == null) return;
+      // A few pixels of slop, so a slightly shaky click still counts as a click.
+      if (!moved && Math.hypot(move.clientX - startX, move.clientY - startY) < 4) return;
+      if (!isActive) return; // an empty slot has nothing to drag yet
       moved = true;
-      if (this.dragCut?.to === target) return;
+      const target = this.gapUnder(move.clientX, move.clientY);
+      if (target == null || this.dragCut?.to === target) return;
       this.dragCut = { from: afterPage, to: target };
       this.root.classList.add('is-cutdragging');
       this.syncCutMarks();
@@ -254,12 +273,14 @@ export class PageGrid {
       this.root.classList.remove('is-cutdragging');
       const drag = this.dragCut;
       this.dragCut = null;
+
       if (moved && drag && drag.to !== drag.from) {
-        this.suppressCutClick = true;
-        setTimeout(() => { this.suppressCutClick = false; }, 0);
         this.handlers.onCommand('move-cut', { from: drag.from, to: drag.to });
+      } else if (moved) {
+        this.syncCutMarks(); // dragged back where it started
       } else {
-        this.syncCutMarks();
+        // A plain click: add a split here, or remove the one already here.
+        this.handlers.onCommand('toggle-cut', { afterPage });
       }
     };
 

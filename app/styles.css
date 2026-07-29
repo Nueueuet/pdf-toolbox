@@ -300,9 +300,10 @@ button { font: inherit; }
 }
 
 .grid__cards {
+  --grid-gap: 22px;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(var(--thumb-width), 1fr));
-  gap: 22px;
+  gap: var(--grid-gap);
   align-items: start;
 }
 
@@ -471,21 +472,31 @@ button { font: inherit; }
 /* ------------------------------------------------------------- split marks */
 
 /*
- * A split sits in the gap after a page, so it is anchored to that card and
- * reaches into the gutter. Drawn on top of everything else in the grid because
- * the whole point is that it should be impossible to miss.
+ * Every gap between two pages is a slot. A slot holding a split is drawn in
+ * full; an empty one is an invisible-but-clickable target that reveals itself on
+ * hover, so the whole strip stays quiet until you reach for it.
  */
 .cutmark {
   position: absolute;
   top: 0;
   bottom: 30px;
-  right: -12px;
+  /* Centred in the gutter, so it steals as little of the page card as possible. */
+  right: calc(var(--grid-gap, 22px) / -2 - 12px);
   width: 24px;
   z-index: 3;
   display: grid;
   place-items: center;
-  cursor: grab;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity .12s;
 }
+
+.cutmark.is-active { opacity: 1; cursor: grab; }
+.cutmark:hover { opacity: 1; }
+
+/* In the Split tool, show where the cuts could go without having to hunt. */
+.grid.is-splithint .cutmark { opacity: .34; }
+.grid.is-splithint .cutmark:hover, .grid.is-splithint .cutmark.is-active { opacity: 1; }
 
 .cutmark__line {
   position: absolute;
@@ -507,28 +518,27 @@ button { font: inherit; }
   place-items: center;
   width: 24px;
   height: 24px;
-  padding: 0;
   border: 1px solid var(--danger);
   border-radius: 50%;
   background: #fff;
   color: var(--danger);
-  cursor: grab;
   box-shadow: var(--shadow-sm);
-  transition: transform .12s, background .12s;
+  transition: transform .12s, background .12s, color .12s;
 }
 
 .cutmark__grip svg { width: 13px; height: 13px; }
 
-.cutmark__grip:hover {
+.cutmark:hover .cutmark__grip {
   background: var(--danger);
   color: #fff;
   transform: scale(1.12);
 }
 
-.cutmark__grip:active { cursor: grabbing; }
+.cutmark.is-active { cursor: grab; }
+.cutmark.is-active:active { cursor: grabbing; }
 
 .grid.is-cutdragging { cursor: grabbing; }
-.grid.is-cutdragging .cutmark__grip { background: var(--danger); color: #fff; }
+.grid.is-cutdragging .cutmark.is-active .cutmark__grip { background: var(--danger); color: #fff; }
 
 .grid.is-dragging .pcard { cursor: grabbing; }
 
