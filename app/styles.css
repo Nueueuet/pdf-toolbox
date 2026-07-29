@@ -55,9 +55,19 @@ button { font: inherit; }
 
 .body {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   min-height: 0;
 }
+
+/*
+ * Each column is claimed explicitly. Without this, hiding the rail and the panel
+ * (as the empty state does) removes them from the grid, and the workspace falls
+ * back into the first `auto` column — where it is sized to its content and the
+ * landing page sits in a narrow strip on the left instead of filling the window.
+ */
+.rail { grid-column: 1; }
+.workspace { grid-column: 2; }
+.panel { grid-column: 3; }
 
 /* ------------------------------------------------------------------ topbar */
 
@@ -495,7 +505,7 @@ button { font: inherit; }
 .cutmark:hover { opacity: 1; }
 
 /* In the Split tool, show where the cuts could go without having to hunt. */
-.grid.is-splithint .cutmark { opacity: .34; }
+.grid.is-splithint .cutmark { opacity: .5; }
 .grid.is-splithint .cutmark:hover, .grid.is-splithint .cutmark.is-active { opacity: 1; }
 
 .cutmark__line {
@@ -526,12 +536,33 @@ button { font: inherit; }
   transition: transform .12s, background .12s, color .12s;
 }
 
+/*
+ * Only a real cut is red. A merely possible position is neutral grey, otherwise
+ * the Split tool paints the whole grid red and it becomes impossible to see
+ * where the document will actually be cut.
+ */
+.cutmark:not(.is-active) .cutmark__line {
+  background: repeating-linear-gradient(to bottom, #b6c5d4 0 4px, transparent 4px 10px);
+}
+
+.cutmark:not(.is-active) .cutmark__grip {
+  border-color: #c4d1de;
+  color: var(--ink-faint);
+  box-shadow: none;
+}
+
 .cutmark__grip svg { width: 13px; height: 13px; }
 
 .cutmark:hover .cutmark__grip {
   background: var(--danger);
+  border-color: var(--danger);
   color: #fff;
   transform: scale(1.12);
+}
+
+/* Hovering an empty slot promises "a cut goes here", so it previews in red. */
+.cutmark:not(.is-active):hover .cutmark__line {
+  background: repeating-linear-gradient(to bottom, var(--danger) 0 6px, transparent 6px 11px);
 }
 
 .cutmark.is-active { cursor: grab; }

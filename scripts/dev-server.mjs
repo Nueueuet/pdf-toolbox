@@ -34,6 +34,21 @@ const TYPES = {
 createServer(async (req, res) => {
   try {
     const url = new URL(req.url, `http://localhost:${port}`);
+
+    /*
+     * Used only by the screenshot script. A headless capture runs with
+     * --virtual-time-budget, which fast-forwards timers but pauses the virtual
+     * clock while a network request is outstanding. Holding one request open is
+     * therefore the only reliable way to grant real wall-clock time for
+     * thumbnails to finish rendering before the shot is taken.
+     */
+    if (url.pathname === '/__wait') {
+      const ms = Math.min(20000, Math.max(0, Number(url.searchParams.get('ms')) || 0));
+      await new Promise((resolve) => setTimeout(resolve, ms));
+      res.writeHead(204).end();
+      return;
+    }
+
     let filePath = path.join(root, decodeURIComponent(url.pathname));
 
     if (url.pathname === '/') filePath = path.join(root, 'app', 'index.html');

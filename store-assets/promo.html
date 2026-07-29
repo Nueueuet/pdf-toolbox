@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Promo tile</title>
+  <style>
+    /*
+      The two promotional tile sizes the store accepts. The size comes from the
+      ?size= parameter so one page can produce both, captured by
+      scripts/screenshots.mjs at exactly these dimensions.
+    */
+    html, body { margin: 0; padding: 0; overflow: hidden; }
+
+    .tile {
+      position: relative;
+      display: flex;
+      align-items: center;
+      overflow: hidden;
+      background: linear-gradient(135deg, #3884ff 0%, #1d4ed8 100%);
+      color: #fff;
+      font-family: "Segoe UI", -apple-system, Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    body[data-size="small"] .tile { width: 440px; height: 280px; flex-direction: column; justify-content: center; text-align: center; gap: 14px; }
+    body[data-size="large"] .tile { width: 1400px; height: 560px; gap: 64px; padding: 0 88px; }
+
+    /* A sheet of paper with the corner turned down — the same mark as the icon. */
+    .sheet {
+      position: relative;
+      flex: none;
+      background: #fff;
+      border-radius: 6px;
+      box-shadow: 0 18px 50px rgba(8, 24, 56, .34);
+      transform: rotate(-4deg);
+    }
+    body[data-size="small"] .sheet { width: 92px; height: 118px; }
+    body[data-size="large"] .sheet { width: 268px; height: 344px; }
+
+    .sheet::after {
+      content: "";
+      position: absolute;
+      top: 0; right: 0;
+      border-style: solid;
+      border-color: #bad4ff #bad4ff transparent transparent;
+      border-radius: 0 6px 0 6px;
+    }
+    body[data-size="small"] .sheet::after { border-width: 26px; }
+    body[data-size="large"] .sheet::after { border-width: 62px; }
+
+    .sheet i {
+      position: absolute;
+      left: 14%;
+      height: 5%;
+      border-radius: 99px;
+      background: #cfe0fb;
+    }
+    body[data-size="large"] .sheet i { height: 3.4%; }
+    .sheet i:nth-child(1) { top: 22%; width: 58%; }
+    .sheet i:nth-child(2) { top: 34%; width: 72%; }
+    .sheet i:nth-child(3) { top: 46%; width: 64%; }
+    .sheet i:nth-child(4) { top: 58%; width: 72%; }
+    .sheet i:nth-child(5) { top: 70%; width: 40%; }
+
+    .copy { display: flex; flex-direction: column; }
+    body[data-size="small"] .copy { align-items: center; gap: 6px; }
+    body[data-size="large"] .copy { gap: 18px; }
+
+    .name { font-weight: 800; letter-spacing: -.02em; line-height: 1; }
+    body[data-size="small"] .name { font-size: 38px; }
+    body[data-size="large"] .name { font-size: 92px; }
+
+    .tag { font-weight: 500; line-height: 1.35; color: #dceaff; }
+    body[data-size="small"] .tag { font-size: 15px; max-width: 330px; }
+    body[data-size="large"] .tag { font-size: 30px; max-width: 700px; }
+
+    .chips { display: flex; flex-wrap: wrap; }
+    body[data-size="small"] .chips { justify-content: center; gap: 6px; margin-top: 4px; }
+    body[data-size="large"] .chips { gap: 12px; margin-top: 10px; }
+
+    .chip {
+      border-radius: 999px;
+      background: rgba(255, 255, 255, .17);
+      color: #fff;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    body[data-size="small"] .chip { padding: 4px 11px; font-size: 12px; }
+    body[data-size="large"] .chip { padding: 9px 22px; font-size: 21px; }
+  </style>
+</head>
+<body>
+  <div class="tile">
+    <div class="sheet"><i></i><i></i><i></i><i></i><i></i></div>
+    <div class="copy">
+      <div class="name">PDF Toolbox</div>
+      <div class="tag">Merge, split, compress, convert, crop and sign PDFs — all in one window, all on your own machine.</div>
+      <div class="chips">
+        <span class="chip">Merge</span>
+        <span class="chip">Split</span>
+        <span class="chip">Compress</span>
+        <span class="chip">Convert</span>
+        <span class="chip">Nothing uploaded</span>
+      </div>
+    </div>
+  </div>
+  <script>
+    const size = new URLSearchParams(location.search).get('size') || 'large';
+    document.body.dataset.size = size;
+    document.documentElement.dataset.demoReady = 'true';
+  </script>
+</body>
+</html>

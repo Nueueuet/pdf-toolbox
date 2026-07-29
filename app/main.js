@@ -13,6 +13,8 @@ import { primeFontMetrics } from './core/fonts.js';
 import { passwordPrompt } from './ui/modal.js';
 import { toast, progressToast } from './ui/toast.js';
 import { baseName, formatBytes } from './util/format.js';
+import { IN_EXTENSION } from './core/paths.js';
+import { makeAnnot } from './core/annots.js';
 import { PDFDocument } from '../vendor/pdf-lib.esm.js';
 
 class App {
@@ -70,6 +72,62 @@ class App {
 
     this.grid.setZoom(0.3);
     primeFontMetrics().catch((err) => console.error('font metrics failed', err));
+
+    // Dev-server only. `scripts/screenshots.mjs` uses this to capture the real
+    // UI with real documents in it, rather than shipping a mocked-up picture to
+    // the store. Guarded so it can never run in the packaged extension, where
+    // there are no sample files to load anyway.
+    if (!IN_EXTENSION && location.search.includes('demo=')) {
+      this.runDemo().catch((err) => console.error('demo setup failed', err));
+    }
+  }
+
+  /** Loads sample documents and puts the app into a given state, for screenshots. */
+  async runDemo() {
+    const params = new URLSearchParams(location.search);
+
+    /*
+     * A headless `--screenshot` fires on the window load event, and load waits
+     * for subresources. Adding an image the dev server answers slowly therefore
+     * holds the shot back until the documents are actually on screen. Timer- and
+     * virtual-clock-based waits do not work here: the capture fast-forwards
+     * timers, and parsing PDFs is CPU work in a worker that it races straight
+     * past, producing a screenshot of a half-loaded page.
+     */
+    const hold = new Image();
+    hold.src = '/__wait?ms=9000';
+    hold.style.display = 'none';
+    document.head.appendChild(hold);
+
+    const names = (params.get('files') ?? 'report.pdf,invoice.pdf,appendix.pdf').split(',');
+
+    const files = [];
+    for (const name of names) {
+      const response = await fetch(`../test-files/${name.trim()}`);
+      if (!response.ok) continue;
+      files.push(new File([await response.blob()], name.trim(), { type: 'application/pdf' }));
+    }
+    if (files.length === 0) throw new Error('no sample files found — run "npm run test-files"');
+    await this.importFiles(files);
+
+    if (params.get('zoom')) this.setZoom(Number(params.get('zoom')));
+    if (params.get('cuts')) this.ws.setCuts(params.get('cuts').split(',').map(Number));
+
+    this.selectTool(params.get('demo') || 'merge');
+
+    if (params.get('annot')) {
+      const page = this.currentPage();
+      page.annots.push(makeAnnot({
+        text: 'Reviewed and approved\n14 March',
+        x: 0.09, y: 0.1, w: 0.46, h: 0.13, size: 17,
+        color: '#0a6fc2', bgColor: '#eaf4fd',
+        border: { color: '#0d8bf2', width: 1 },
+      }));
+      await this.editor.refresh();
+      this.editor.select(page.annots[page.annots.length - 1].id);
+    }
+
+    document.documentElement.dataset.demoReady = 'true';
   }
 
   // ------------------------------------------------------------------ chrome
