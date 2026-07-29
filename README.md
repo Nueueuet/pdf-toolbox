@@ -191,6 +191,5 @@ telemetry. See [PRIVACY.md](PRIVACY.md).
 
 ## Licence
 
-MIT — see [LICENSE](LICENSE). The vendored libraries keep their own: pdf-lib
-(MIT), pdf.js (Apache 2.0), JSZip (MIT), TensorFlow.js (Apache 2.0), ESRGAN-slim
-via UpscalerJS (MIT).
+MIT — see [LICENSE](LICENSE). The bundled libraries keep their own licences,
+listed in [THIRD-PARTY.md](THIRD-PARTY.md).
