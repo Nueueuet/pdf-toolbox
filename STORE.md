@@ -21,7 +21,14 @@ explains the option is unavailable.
 
 ## 2. Register as a developer, once
 
-<https://chrome.google.com/webstore/devconsole> → pay the one-time \$5 fee.
+<https://chrome.google.com/webstore/devconsole>
+
+- Sign in with a **personal** Google account. A Workspace account can be blocked
+  from registering by its admin.
+- Pay the one-time \$5 USD fee (card required). It covers the account, not the
+  item, so you pay it once no matter how many extensions you publish.
+- Under *Account*, set and verify a contact email. The dashboard refuses to
+  submit anything until that is done.
 
 ## 3. Create the listing
 
@@ -90,7 +97,11 @@ This is the part reviewers read closely. Answer it like this:
 - **Data collected**: none. Tick nothing.
 - **Remote code**: **No.** Every library is bundled in the package; the content
   security policy blocks external scripts.
-- **Privacy policy URL**: point at `PRIVACY.md` in your public repository.
+- **Privacy policy URL**:
+
+  ```
+  https://github.com/Nueueuet/pdf-toolbox/blob/main/PRIVACY.md
+  ```
 
 Permission justifications:
 
