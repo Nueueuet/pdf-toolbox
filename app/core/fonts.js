@@ -108,34 +108,52 @@ export function sanitize(text) {
 
 /**
  * Greedy word wrap into `maxWidth` points, honouring explicit newlines.
- * @returns {string[]} the laid-out lines
+ *
+ * Each line carries its character offsets into the original string. Highlights
+ * are stored as character ranges, so without offsets there is no way to work out
+ * which part of which line a highlight covers.
+ *
+ * @returns {{text: string, start: number, end: number}[]}
  */
 export function wrapText(text, style, maxWidth) {
+  const source = String(text ?? '').replace(/\r\n/g, '\n');
+  const limit = Math.max(1, maxWidth);
   const lines = [];
-  for (const paragraph of String(text ?? '').split(/\r?\n/)) {
+  let paragraphStart = 0;
+
+  for (const paragraph of source.split('\n')) {
+    const paragraphEnd = paragraphStart + paragraph.length;
+
     if (paragraph === '') {
-      lines.push('');
+      lines.push({ text: '', start: paragraphStart, end: paragraphStart });
+      paragraphStart = paragraphEnd + 1;
       continue;
     }
-    let current = '';
-    for (const word of paragraph.split(/(\s+)/)) {
-      if (word === '') continue;
-      const candidate = current + word;
-      if (current !== '' && widthOf(candidate, style) > maxWidth) {
-        lines.push(current.trimEnd());
-        current = word.trimStart();
-        // A single word longer than the box has to be broken mid-word.
-        while (widthOf(current, style) > maxWidth && current.length > 1) {
-          let cut = current.length - 1;
-          while (cut > 1 && widthOf(current.slice(0, cut), style) > maxWidth) cut--;
-          lines.push(current.slice(0, cut));
-          current = current.slice(cut);
-        }
-      } else {
-        current = candidate;
+
+    let lineStart = paragraphStart;
+    let lastBreak = -1; // index of the most recent space we could break at
+    let i = paragraphStart;
+
+    while (i < paragraphEnd) {
+      const next = i + 1;
+      if (widthOf(source.slice(lineStart, next), style) > limit && next > lineStart + 1) {
+        // Break at the last space if there was one, otherwise mid-word.
+        const breakAt = lastBreak > lineStart ? lastBreak : i;
+        lines.push({ text: source.slice(lineStart, breakAt), start: lineStart, end: breakAt });
+        let resume = breakAt;
+        while (resume < paragraphEnd && /\s/.test(source[resume])) resume++;
+        lineStart = resume;
+        lastBreak = -1;
+        i = Math.max(resume, breakAt);
+        continue;
       }
+      if (/\s/.test(source[i])) lastBreak = i;
+      i = next;
     }
-    lines.push(current.trimEnd());
+    lines.push({ text: source.slice(lineStart, paragraphEnd), start: lineStart, end: paragraphEnd });
+
+    paragraphStart = paragraphEnd + 1;
   }
+
   return lines;
 }

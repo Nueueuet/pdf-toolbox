@@ -24,7 +24,12 @@ export const DEFAULT_ANNOT = {
   valign: 'top',
   lineSpacing: 1.25,
   padding: 4,
-  highlight: null,
+  /**
+   * Highlighted character ranges: [{ start, end, color }], half-open, indexing
+   * into `text`. A range rather than a flag on the whole box, because
+   * highlighting means "these words", the way it does in a word processor.
+   */
+  marks: [],
   bgColor: null,
   border: null,
   opacity: 1,
@@ -32,7 +37,67 @@ export const DEFAULT_ANNOT = {
 };
 
 export function makeAnnot(overrides = {}) {
-  return { ...DEFAULT_ANNOT, id: uid('an'), ...overrides };
+  const annot = { ...DEFAULT_ANNOT, id: uid('an'), ...overrides };
+  annot.marks = normalizeMarks(annot.marks, annot.text);
+  // Older annotations (and stamps saved before ranges existed) carried a single
+  // `highlight` colour for the whole box; keep them rendering as they did.
+  if (annot.highlight && annot.marks.length === 0 && annot.text) {
+    annot.marks = [{ start: 0, end: annot.text.length, color: annot.highlight }];
+  }
+  delete annot.highlight;
+  return annot;
+}
+
+/** Sorts, clamps and merges touching ranges of the same colour. */
+export function normalizeMarks(marks, text) {
+  const length = String(text ?? '').length;
+  const clean = (marks ?? [])
+    .map((m) => ({
+      start: Math.max(0, Math.min(length, m.start | 0)),
+      end: Math.max(0, Math.min(length, m.end | 0)),
+      color: m.color,
+    }))
+    .filter((m) => m.end > m.start && m.color)
+    .sort((a, b) => a.start - b.start || a.end - b.end);
+
+  const merged = [];
+  for (const mark of clean) {
+    const previous = merged[merged.length - 1];
+    if (previous && previous.color === mark.color && mark.start <= previous.end) {
+      previous.end = Math.max(previous.end, mark.end);
+    } else {
+      merged.push({ ...mark });
+    }
+  }
+  return merged;
+}
+
+/** Applies `color` to [start, end), splitting any ranges it overlaps. */
+export function applyMark(marks, start, end, color, text) {
+  if (end <= start) return normalizeMarks(marks, text);
+  const kept = [];
+  for (const mark of marks ?? []) {
+    if (mark.end <= start || mark.start >= end) {
+      kept.push(mark);
+      continue;
+    }
+    // Trim the parts of the old range that fall outside the new one.
+    if (mark.start < start) kept.push({ ...mark, end: start });
+    if (mark.end > end) kept.push({ ...mark, start: end });
+  }
+  if (color) kept.push({ start, end, color });
+  return normalizeMarks(kept, text);
+}
+
+/** Shifts ranges so they still cover the same words after an edit. */
+export function shiftMarks(marks, at, removed, inserted, text) {
+  const delta = inserted - removed;
+  const moved = (marks ?? []).map((mark) => {
+    const start = mark.start >= at + removed ? mark.start + delta : mark.start > at ? at : mark.start;
+    const end = mark.end >= at + removed ? mark.end + delta : mark.end > at ? at + inserted : mark.end;
+    return { ...mark, start, end };
+  });
+  return normalizeMarks(moved, text);
 }
 
 /** Approximate ascent as a fraction of font size; good enough for box placement. */
@@ -69,21 +134,46 @@ export function layoutAnnot(annot, winW, winH) {
     ? { x: box.x + box.w / 2, y: box.y + box.h / 2 }
     : { x: 0, y: 0 };
 
-  const lines = texts.map((text, i) => {
-    const clean = sanitize(text);
+  const source = String(annot.text ?? '').replace(/\r\n/g, '\n');
+  const marks = normalizeMarks(annot.marks, source);
+
+  const lines = texts.map((line, i) => {
+    const clean = sanitize(line.text);
     const width = widthOf(clean, style);
     let x = box.x + pad;
     if (annot.align === 'center') x = box.x + (box.w - width) / 2;
     else if (annot.align === 'right') x = box.x + box.w - pad - width;
     const baseline = firstTop + i * lineHeight + annot.size * ASCENT;
+    const top = baseline - annot.size * ASCENT;
+
+    // Only the marked characters get a highlight, so each range is clipped to
+    // this line and measured from the line's own start.
+    const highlights = [];
+    for (const mark of marks) {
+      const from = Math.max(mark.start, line.start);
+      const to = Math.min(mark.end, line.end);
+      if (to <= from) continue;
+      const before = widthOf(sanitize(source.slice(line.start, from)), style);
+      const span = widthOf(sanitize(source.slice(from, to)), style);
+      if (span <= 0) continue;
+      highlights.push({
+        dx: x + before - pivot.x,
+        dy: top - pivot.y,
+        w: span,
+        h: lineHeight,
+        color: mark.color,
+      });
+    }
+
     return {
       text: clean,
       width,
+      start: line.start,
+      end: line.end,
       // offsets from the pivot, still unrotated
       dx: x - pivot.x,
       dy: baseline - pivot.y,
-      // the highlight strip sits behind the glyphs of this line only
-      hl: { dx: x - pivot.x, dy: baseline - annot.size * ASCENT - pivot.y, w: width, h: lineHeight },
+      highlights,
     };
   });
 
@@ -148,9 +238,9 @@ export function drawAnnotOnCanvas(ctx, annot, winW, winH, scale) {
   ctx.textBaseline = 'alphabetic';
 
   for (const line of layout.lines) {
-    if (annot.highlight && line.text) {
-      ctx.fillStyle = annot.highlight;
-      ctx.fillRect(line.hl.dx, line.hl.dy, line.hl.w, line.hl.h);
+    for (const strip of line.highlights) {
+      ctx.fillStyle = strip.color;
+      ctx.fillRect(strip.dx, strip.dy, strip.w, strip.h);
     }
     ctx.fillStyle = annot.color;
     ctx.fillText(line.text, line.dx, line.dy);

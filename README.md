@@ -56,7 +56,7 @@ npm run vendor:ai
 
 | Tool | What it does |
 | --- | --- |
-| Write | Text boxes you drag, resize and type into directly on the page. Font, size, colour, bold/italic, alignment, highlight behind the text, box fill, border and rotation. |
+| Write | Text boxes on the page. **Click into the middle to type or select text; drag the edge to move the box**, or the handles to resize it. Font, size, colour, bold/italic, alignment, box fill, border and rotation. **Highlighting applies to the text you selected**, not to the whole box. |
 | Stamps | Save a styled text box and reuse it. An inserted stamp is an ordinary text box — editing it on the page does **not** change the saved stamp unless you explicitly save it again. |
 | Watermark | Text across the middle, tiled, or along the footer, at any angle and opacity. Also removes watermarks again (see limitations). |
 | Background | Replace the page background with a colour or make it transparent, on any range of pages. The threshold slider decides how dingy a scan's "white" is allowed to be. |
@@ -117,6 +117,15 @@ Builds `dist/pdf-toolbox-<version>.zip` for the Chrome Web Store — which Brave
 installs from too. **[STORE.md](STORE.md)** has the listing copy, the permission
 justifications reviewers ask for, and the steps. The submission itself needs a
 Google account and a one-time \$5 developer fee, so that part is yours to do.
+
+Every upload needs a higher `version` in `manifest.json` than the last one, and
+each update goes through review again.
+
+To keep an unpacked copy somewhere else in sync — a synced drive, so other
+machines can load it without cloning — put that folder's absolute path in
+`mirror.local.txt` (gitignored) or set `PDF_TOOLBOX_MIRROR`. `npm run package`
+then refreshes it, and refuses to touch a folder that is neither empty nor a
+previous build.
 
 Until it is in the store, *Load unpacked* works on every machine and survives
 restarts.

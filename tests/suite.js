@@ -9,11 +9,13 @@
 import { Workspace } from '../app/core/workspace.js';
 import { buildPdf } from '../app/core/export.js';
 import { renderPageCanvas } from '../app/core/render.js';
-import { makeAnnot } from '../app/core/annots.js';
+import { makeAnnot, applyMark } from '../app/core/annots.js';
+import { wrapText } from '../app/core/fonts.js';
 import { pageSize } from '../app/core/workspace.js';
 import { extractRows, toCsv } from '../app/core/text.js';
 import { parseRange, formatRange } from '../app/util/ranges.js';
 import { primeFontMetrics } from '../app/core/fonts.js';
+import { PageEditor } from '../app/ui/pageeditor.js';
 import { PageGrid } from '../app/ui/pagegrid.js';
 import * as pdfjsLib from '../vendor/pdf.mjs';
 
@@ -301,6 +303,117 @@ test('reordering a file moves all of its pages as a block', async () => {
   const grouped = ws.fileGroups();
   assert(grouped.length === 2 && grouped.every((g) => g.pages.length === 2),
     'file grouping broke after an interleaved move');
+});
+
+test('highlights cover only the marked characters', async () => {
+  const ws = await loadWorkspace(['invoice.pdf']);
+  const page = ws.pages[0];
+
+  // "Reviewed" highlighted, the rest not.
+  page.annots = [makeAnnot({
+    text: 'Reviewed and approved today',
+    x: 0.1, y: 0.1, w: 0.7, h: 0.1, size: 20,
+    color: '#111111',
+    marks: [{ start: 0, end: 8, color: '#ffee00' }],
+  })];
+
+  const preview = (await renderPageCanvas(ws, page, { scale: 1 })).canvas;
+  const out = await renderBytes(await buildPdf(ws, [page], {}));
+
+  for (const [label, canvas] of [['preview', preview], ['export', out.canvas]]) {
+    const yellow = centroid(canvas, isYellow);
+    assert(yellow, `${label}: no highlight drawn`);
+    // Marking 8 of 27 characters must not paint the whole line: the strip has to
+    // sit in the left third of the box, which starts at x = 0.1.
+    assert(yellow.x < 0.32, `${label}: highlight extends past the marked text (centre ${yellow.x.toFixed(3)})`);
+  }
+
+  // Same range, split across two lines by a narrow box, still only that range.
+  page.annots[0].w = 0.22;
+  page.annots[0].marks = [{ start: 9, end: 21, color: '#ffee00' }];
+  const narrow = (await renderPageCanvas(ws, page, { scale: 1 })).canvas;
+  const marked = centroid(narrow, isYellow);
+  assert(marked, 'no highlight after wrapping');
+  const all = centroid(narrow, (r, g, b) => !(r > 240 && g > 240 && b > 240));
+  assert(marked.count < all.count, 'the highlight covers everything, not just the marked words');
+
+  page.annots = [];
+});
+
+test('applying and clearing a highlight range', async () => {
+  const text = 'one two three';
+  let marks = applyMark([], 4, 7, '#ffee00', text);
+  assert(marks.length === 1 && marks[0].start === 4 && marks[0].end === 7, `apply: ${JSON.stringify(marks)}`);
+
+  // Overlapping a second colour splits the first rather than stacking.
+  marks = applyMark(marks, 6, 9, '#88ccff', text);
+  assert(marks.length === 2, `overlap: ${JSON.stringify(marks)}`);
+  assert(marks[0].end === 6 && marks[1].start === 6, `overlap boundaries: ${JSON.stringify(marks)}`);
+
+  // Clearing punches a hole in the middle of a range.
+  marks = applyMark([{ start: 0, end: 13, color: '#ffee00' }], 4, 7, null, text);
+  assert(marks.length === 2, `clear: ${JSON.stringify(marks)}`);
+  assert(marks[0].end === 4 && marks[1].start === 7, `clear boundaries: ${JSON.stringify(marks)}`);
+
+  // Touching ranges of one colour merge instead of piling up.
+  marks = applyMark([{ start: 0, end: 4, color: '#ffee00' }], 4, 8, '#ffee00', text);
+  assert(marks.length === 1 && marks[0].end === 8, `merge: ${JSON.stringify(marks)}`);
+});
+
+test('wrapped lines report the character offsets highlights need', () => {
+  const style = { family: 'Helvetica', bold: false, italic: false, size: 12 };
+  const text = 'alpha beta gamma delta';
+  const lines = wrapText(text, style, 60);
+  assert(lines.length > 1, 'the text should have wrapped');
+  for (const line of lines) {
+    assert(text.slice(line.start, line.end) === line.text,
+      `offsets do not match the text: ${JSON.stringify(line)}`);
+  }
+  // Explicit newlines keep their own offsets too.
+  const multi = wrapText('a\nb', style, 500);
+  assert(multi.length === 2 && multi[0].text === 'a' && multi[1].text === 'b', JSON.stringify(multi));
+  assert(multi[1].start === 2, `offset after a newline: ${JSON.stringify(multi)}`);
+});
+
+test('a text box moves from its edge, but takes a caret in the middle', async () => {
+  const ws = await loadWorkspace(['invoice.pdf']);
+  const page = ws.pages[0];
+  page.annots = [makeAnnot({ text: 'Hello there', x: 0.2, y: 0.2, w: 0.5, h: 0.2 })];
+
+  const host = document.createElement('div');
+  host.style.cssText = 'position:fixed;left:0;top:0;width:900px;height:700px;opacity:0;z-index:9999';
+  document.body.appendChild(host);
+  const editor = new PageEditor(host, ws, { onChange: () => {}, onSelectAnnot: () => {} });
+
+  const press = (el, at, move) => {
+    const base = { bubbles: true, cancelable: true, button: 0, pointerId: 1 };
+    el.dispatchEvent(new PointerEvent('pointerdown', { ...base, clientX: at.x, clientY: at.y }));
+    window.dispatchEvent(new PointerEvent('pointermove', { ...base, clientX: at.x + move.dx, clientY: at.y + move.dy }));
+    window.dispatchEvent(new PointerEvent('pointerup', { ...base, clientX: at.x + move.dx, clientY: at.y + move.dy }));
+  };
+
+  try {
+    await editor.open(page);
+    const box = host.querySelector('.abox');
+    assert(box, 'no text box was rendered');
+    assert(box.querySelector('.abox__text').isContentEditable, 'the text is not editable');
+
+    const rect = box.getBoundingClientRect();
+    const startX = page.annots[0].x;
+
+    // Dragging from the middle must leave the box alone — that gesture belongs
+    // to the text, for placing a caret or selecting words.
+    press(box, { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }, { dx: 40, dy: 30 });
+    assert(page.annots[0].x === startX, 'a press in the middle moved the box');
+
+    // Dragging from the border must move it.
+    press(box, { x: rect.left + 3, y: rect.top + rect.height / 2 }, { dx: 40, dy: 30 });
+    assert(page.annots[0].x !== startX, 'a press on the edge did not move the box');
+  } finally {
+    editor.destroy();
+    host.remove();
+    page.annots = [];
+  }
 });
 
 test('a tilted watermark lands where the preview puts it', async () => {

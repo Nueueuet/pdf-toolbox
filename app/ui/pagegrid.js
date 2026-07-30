@@ -443,7 +443,7 @@ export class PageGrid {
     return JSON.stringify([
       page.id, page.rotate, page.angle, page.crop, page.bg, page.rasterId,
       page.annots.map((a) => [a.id, a.x, a.y, a.w, a.h, a.text, a.size, a.color, a.family, a.bold, a.italic,
-        a.align, a.valign, a.highlight, a.bgColor, a.border, a.rotate, a.opacity]),
+        a.align, a.valign, a.marks, a.bgColor, a.border, a.rotate, a.opacity]),
       Math.round(this.zoom * 100),
     ]);
   }

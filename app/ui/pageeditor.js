@@ -9,6 +9,7 @@
 import { h, clear } from '../util/dom.js';
 import { renderPageCanvas } from '../core/render.js';
 import { cssFamilyFor } from '../core/fonts.js';
+import { normalizeMarks } from '../core/annots.js';
 import { normalizeCrop } from '../core/geometry.js';
 import { clamp } from '../util/format.js';
 
@@ -127,8 +128,11 @@ export class PageEditor {
   }
 
   annotBox(annot) {
-    const text = h('span.abox__text', { contenteditable: 'false', spellcheck: 'false' });
-    text.textContent = annot.text;
+    // Always editable: clicking into the middle of a box should put a caret
+    // there, the way it does in any word processor. Moving the box happens from
+    // its edge instead — see onBoxPointerDown.
+    const text = h('span.abox__text', { contenteditable: 'true', spellcheck: 'false' });
+    renderMarkedText(text, annot);
 
     const box = h('div.abox', {
       dataset: { id: annot.id },
@@ -137,22 +141,42 @@ export class PageEditor {
 
     this.styleBox(box, annot);
 
-    box.addEventListener('pointerdown', (event) => this.onBoxPointerDown(event, annot, box, text));
-    box.addEventListener('dblclick', (event) => {
-      event.stopPropagation();
-      this.beginTextEdit(annot, box, text);
-    });
+    box.addEventListener('pointerdown', (event) => this.onBoxPointerDown(event, annot, box));
+    box.addEventListener('pointermove', (event) => this.updateEdgeCursor(event, box));
+    box.addEventListener('pointerleave', () => box.classList.remove('is-edge'));
     text.addEventListener('input', () => {
-      annot.text = text.innerText.replace(/ /g, ' ');
+      const read = readMarkedText(text);
+      annot.text = read.text;
+      annot.marks = read.marks;
       this.handlers.onChange({ structural: false });
     });
-    text.addEventListener('blur', () => {
-      text.contentEditable = 'false';
-      box.classList.remove('is-editing');
-      this.handlers.onChange();
-    });
+    text.addEventListener('blur', () => this.handlers.onChange());
+    // Typing inside a box must not reach the workspace shortcuts.
+    text.addEventListener('keydown', (event) => event.stopPropagation());
 
     return box;
+  }
+
+  /** Character range currently selected inside the focused text box, if any. */
+  selectionRange() {
+    const box = this.overlay.querySelector(`.abox[data-id="${this.selectedId}"]`);
+    const text = box?.querySelector('.abox__text');
+    return text ? selectionOffsets(text) : null;
+  }
+
+  /** Redraws a box's text after its highlights changed from the panel. */
+  refreshText(annot) {
+    const box = this.overlay.querySelector(`.abox[data-id="${annot.id}"]`);
+    const text = box?.querySelector('.abox__text');
+    if (!text) return;
+    const selection = selectionOffsets(text);
+    renderMarkedText(text, annot);
+    if (selection) restoreSelection(text, selection);
+  }
+
+  /** Shows the move cursor only in the grab band around the border. */
+  updateEdgeCursor(event, box) {
+    box.classList.toggle('is-edge', isNearEdge(event, box));
   }
 
   styleBox(box, annot) {
@@ -183,8 +207,8 @@ export class PageEditor {
       color: annot.color,
       fontWeight: annot.bold ? '700' : '400',
       fontStyle: annot.italic ? 'italic' : 'normal',
-      background: annot.highlight ?? 'transparent',
     });
+    // Highlights are per-character-range now, carried by spans inside the text.
   }
 
   /** Applies style changes from the tool panel without rebuilding the overlay. */
@@ -193,26 +217,23 @@ export class PageEditor {
     if (!box) return this.drawOverlay();
     this.styleBox(box, annot);
     const text = box.querySelector('.abox__text');
-    if (text.innerText !== annot.text && document.activeElement !== text) text.textContent = annot.text;
+    // Never rewrite the text while the caret is in it — that would collapse the
+    // selection mid-edit.
+    if (document.activeElement !== text) renderMarkedText(text, annot);
   }
 
-  beginTextEdit(annot, box, text) {
-    text.contentEditable = 'true';
-    box.classList.add('is-editing');
-    text.focus();
-    const range = document.createRange();
-    range.selectNodeContents(text);
-    const selection = window.getSelection();
-    selection.removeAllRanges();
-    selection.addRange(range);
-  }
-
-  onBoxPointerDown(event, annot, box, text) {
-    if (box.classList.contains('is-editing')) return; // let the caret work
-    event.stopPropagation();
+  onBoxPointerDown(event, annot, box) {
     this.select(annot.id);
 
     const dir = event.target.dataset?.dir;
+    // The middle of a box belongs to the text: a press there places the caret or
+    // starts a selection. Only the band around the border, and the handles, move
+    // or resize the box.
+    if (!dir && !isNearEdge(event, box)) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
     const rect = this.stage.getBoundingClientRect();
     const start = { x: event.clientX, y: event.clientY };
     const origin = { x: annot.x, y: annot.y, w: annot.w, h: annot.h };
@@ -323,4 +344,165 @@ export class PageEditor {
     this.pendingCrop = crop ? { ...crop } : null;
     this.drawOverlay();
   }
+}
+
+// --------------------------------------------------------- marked-up text
+
+/** Width of the band around a box's border that grabs it instead of the text. */
+const EDGE_BAND = 9;
+
+function isNearEdge(event, box) {
+  const rect = box.getBoundingClientRect();
+  // On a small box the band would swallow the whole thing, so it never takes
+  // more than a third of either side.
+  const bandX = Math.min(EDGE_BAND, rect.width / 3);
+  const bandY = Math.min(EDGE_BAND, rect.height / 3);
+  return event.clientX - rect.left < bandX
+    || rect.right - event.clientX < bandX
+    || event.clientY - rect.top < bandY
+    || rect.bottom - event.clientY < bandY;
+}
+
+/**
+ * Splits the text at every highlight boundary. Each piece is uniform, so it can
+ * be one text node or one span.
+ */
+function segmentsOf(text, marks) {
+  const bounds = new Set([0, text.length]);
+  for (const mark of marks ?? []) {
+    bounds.add(mark.start);
+    bounds.add(mark.end);
+  }
+  const ordered = [...bounds].filter((n) => n >= 0 && n <= text.length).sort((a, b) => a - b);
+
+  const segments = [];
+  for (let i = 0; i < ordered.length - 1; i++) {
+    const start = ordered[i];
+    const end = ordered[i + 1];
+    if (end <= start) continue;
+    const mark = (marks ?? []).find((m) => m.start <= start && m.end >= end);
+    segments.push({ text: text.slice(start, end), color: mark?.color ?? null });
+  }
+  return segments;
+}
+
+/** Paints `annot.text` into a contenteditable element, highlights and all. */
+export function renderMarkedText(el, annot) {
+  const text = String(annot.text ?? '');
+  el.replaceChildren(...segmentsOf(text, annot.marks).map((segment) => {
+    if (!segment.color) return document.createTextNode(segment.text);
+    const span = document.createElement('span');
+    span.dataset.hl = segment.color;
+    span.style.background = segment.color;
+    span.textContent = segment.text;
+    return span;
+  }));
+  if (el.childNodes.length === 0) el.appendChild(document.createTextNode(''));
+}
+
+/**
+ * Reads text and highlight ranges back out after the user has typed. The browser
+ * is free to reshape contenteditable's DOM however it likes, so the ranges are
+ * recovered from the surviving spans rather than tracked as edits happen.
+ */
+export function readMarkedText(root) {
+  let text = '';
+  const marks = [];
+
+  const walk = (node) => {
+    for (const child of node.childNodes) {
+      if (child.nodeType === Node.TEXT_NODE) {
+        const color = child.parentElement?.dataset?.hl || null;
+        const start = text.length;
+        text += child.nodeValue;
+        if (color) marks.push({ start, end: text.length, color });
+      } else if (child.nodeName === 'BR') {
+        text += '\n';
+      } else {
+        // contenteditable wraps new paragraphs in divs; each starts a new line.
+        const block = /^(DIV|P)$/.test(child.nodeName);
+        if (block && text !== '' && !text.endsWith('\n')) text += '\n';
+        walk(child);
+      }
+    }
+  };
+  walk(root);
+
+  return { text, marks: normalizeMarks(marks, text) };
+}
+
+/** Character offset of a DOM position, counting the same way readMarkedText does. */
+function offsetOf(root, node, offset) {
+  let count = 0;
+  let done = false;
+
+  const walk = (current) => {
+    if (done) return;
+    if (current.nodeType === Node.TEXT_NODE) {
+      if (current === node) {
+        count += offset;
+        done = true;
+      } else {
+        count += current.nodeValue.length;
+      }
+      return;
+    }
+    if (current.nodeName === 'BR') {
+      count += 1;
+      return;
+    }
+    for (let i = 0; i < current.childNodes.length; i++) {
+      if (current === node && i === offset) {
+        done = true;
+        return;
+      }
+      walk(current.childNodes[i]);
+      if (done) return;
+    }
+    if (current === node) done = true;
+  };
+
+  walk(root);
+  return count;
+}
+
+/** The selection inside `root` as character offsets, or null if there is none. */
+export function selectionOffsets(root) {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) return null;
+  const range = selection.getRangeAt(0);
+  if (!root.contains(range.commonAncestorContainer)) return null;
+
+  const a = offsetOf(root, range.startContainer, range.startOffset);
+  const b = offsetOf(root, range.endContainer, range.endOffset);
+  return { start: Math.min(a, b), end: Math.max(a, b) };
+}
+
+/** Puts the caret back after the text was re-rendered from scratch. */
+function restoreSelection(root, { start, end }) {
+  const locate = (target) => {
+    let seen = 0;
+    const stack = [root];
+    while (stack.length) {
+      const node = stack.shift();
+      if (node.nodeType === Node.TEXT_NODE) {
+        if (seen + node.nodeValue.length >= target) return { node, offset: target - seen };
+        seen += node.nodeValue.length;
+      } else {
+        stack.unshift(...node.childNodes);
+      }
+    }
+    return null;
+  };
+
+  const from = locate(start);
+  const to = locate(end);
+  if (!from || !to) return;
+
+  const range = document.createRange();
+  range.setStart(from.node, from.offset);
+  range.setEnd(to.node, to.offset);
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
 }

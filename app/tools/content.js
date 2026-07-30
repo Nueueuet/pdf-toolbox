@@ -5,7 +5,7 @@ import {
   colorInput, optionalColor, checkbox, textArea, textInput, slider, radioCards,
 } from '../ui/controls.js';
 import { FONT_FAMILIES } from '../core/fonts.js';
-import { makeAnnot } from '../core/annots.js';
+import { makeAnnot, applyMark } from '../core/annots.js';
 import { parseRange } from '../util/ranges.js';
 import { pageScope } from './organize.js';
 import { toast } from '../ui/toast.js';
@@ -42,7 +42,32 @@ function textProperties(ctx, { onEdit }) {
     options: [{ value: 'top', label: 'Top' }, { value: 'middle', label: 'Middle' }, { value: 'bottom', label: 'Bottom' }],
     onchange: (v) => update({ valign: v }),
   });
-  const highlight = optionalColor({ value: null, fallback: '#fde047', onchange: (v) => update({ highlight: v }) });
+  /**
+   * Highlighting works on the selected characters, like a word processor —
+   * not on the whole box. With nothing selected there is nothing to mark, so
+   * the buttons say so rather than silently colouring everything.
+   */
+  const highlightColor = colorInput({ value: '#fde047' });
+  const highlightNote = h('span.field__help');
+
+  const applyHighlight = (color) => {
+    if (!current) return;
+    const range = ctx.editor.selectionRange();
+    if (!range || range.end <= range.start) {
+      highlightNote.textContent = 'Select some text in the box first.';
+      return;
+    }
+    highlightNote.textContent = '';
+    current.marks = applyMark(current.marks, range.start, range.end, color, current.text);
+    ctx.editor.refreshText(current);
+    onEdit(current);
+  };
+
+  const highlight = h('div.inline',
+    highlightColor,
+    button('Highlight', { onclick: () => applyHighlight(highlightColor.value) }),
+    button('Clear', { onclick: () => applyHighlight(null) }),
+  );
   const bgColor = optionalColor({ value: null, fallback: '#ffffff', onchange: (v) => update({ bgColor: v }) });
   const borderColor = optionalColor({ value: null, fallback: '#111827', onchange: (v) => update({ border: v ? { color: v, width: borderWidth.valueAsNumber || 1 } : null }) });
   const borderWidth = numberInput({ value: 1, min: 0.25, max: 12, step: 0.25, oninput: (v) => { if (current?.border) update({ border: { ...current.border, width: v } }); } });
@@ -56,7 +81,8 @@ function textProperties(ctx, { onEdit }) {
     h('div.grid2', field('Colour', color), field('Opacity', opacity)),
     h('div.inline', bold, italic),
     h('div.grid2', field('Align', align), field('Vertical', valign)),
-    field('Highlight', highlight, 'Colour behind the text itself'),
+    field('Highlight', highlight, 'Select text in the box, then apply'),
+    highlightNote,
     field('Box fill', bgColor, 'Colour behind the whole box'),
     h('div.grid2', field('Border', borderColor), field('Border width', borderWidth)),
     field('Rotation', rotation, 'Degrees'),
@@ -81,7 +107,7 @@ function textProperties(ctx, { onEdit }) {
       italic.checked = annot.italic;
       align.value = annot.align;
       valign.value = annot.valign;
-      highlight.value = annot.highlight;
+      highlightNote.textContent = '';
       bgColor.value = annot.bgColor;
       borderColor.value = annot.border?.color ?? null;
       borderWidth.value = String(annot.border?.width ?? 1);

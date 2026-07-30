@@ -407,7 +407,9 @@ function clonePage(page) {
     base: { ...page.base },
     crop: page.crop ? { ...page.crop } : null,
     bg: page.bg ? { ...page.bg } : null,
-    annots: page.annots.map((a) => ({ ...a })),
+    // `marks` has to be copied too, or undo snapshots share the array with the
+    // live annotation and highlighting becomes un-undoable.
+    annots: page.annots.map((a) => ({ ...a, marks: (a.marks ?? []).map((m) => ({ ...m })) })),
     meta: { ...page.meta },
   };
 }

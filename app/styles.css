@@ -609,16 +609,20 @@ button { font: inherit; }
   inset: 0;
 }
 
+/*
+ * The middle of a box is text; only the band around the border moves it. The
+ * cursor has to say which is which, or the box feels like it ignores clicks.
+ */
 .abox {
   position: absolute;
-  cursor: move;
+  cursor: text;
   outline: 1px dashed rgba(13, 139, 242, .55);
   outline-offset: -1px;
 }
 
+.abox.is-edge { cursor: move; }
 .abox:hover { outline-color: var(--blue); }
 .abox.is-selected { outline: 2px solid var(--blue); }
-.abox.is-editing { cursor: text; outline: 2px solid var(--blue); }
 
 .abox__inner {
   display: flex;

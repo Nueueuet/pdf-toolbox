@@ -7,6 +7,10 @@ test-files/
 # Store packages built by `npm run package`.
 dist/
 
+# Machine-specific mirror destination for `npm run package` — a local path, of
+# no use to anyone else.
+mirror.local.txt
+
 # Scratch directories used while unpacking npm tarballs.
 .vendor-tmp/
 .ai-tmp/

@@ -54,6 +54,57 @@ async function copyInto(from, to) {
   await writeFile(to, await readFile(from));
 }
 
+/**
+ * Optionally mirrors the built extension to a folder outside the repo — a synced
+ * drive, say, so other machines can load it unpacked without cloning anything.
+ *
+ * The destination is machine-specific, so it lives in a gitignored file rather
+ * than in this script: put the absolute path in `mirror.local.txt`, or set
+ * PDF_TOOLBOX_MIRROR. With neither, this step is skipped.
+ */
+async function mirror(fromDir, zipFile) {
+  let target = process.env.PDF_TOOLBOX_MIRROR?.trim();
+  if (!target) {
+    try {
+      target = (await readFile(path.join(root, 'mirror.local.txt'), 'utf8')).trim();
+    } catch {
+      return null;
+    }
+  }
+  if (!target) return null;
+
+  // Mirroring wipes the destination, so refuse anything that is not already an
+  // empty folder or a previous copy of this extension. A mistyped path must not
+  // be able to delete somebody's documents.
+  let existing = [];
+  try {
+    existing = await readdir(target);
+  } catch (err) {
+    if (err.code === 'ENOENT') {
+      await mkdir(target, { recursive: true });
+    } else {
+      throw err;
+    }
+  }
+
+  if (existing.length > 0) {
+    const looksLikeOurs = existing.includes('manifest.json') && existing.includes('app');
+    if (!looksLikeOurs) {
+      console.warn(`  skip mirror: ${target} is not empty and does not look like a previous build`);
+      console.warn('         empty it yourself if you really want it overwritten');
+      return null;
+    }
+    for (const entry of existing) {
+      await rm(path.join(target, entry), { recursive: true, force: true });
+    }
+  }
+
+  await copyInto(fromDir, target);
+  // The zip goes along too, for uploading from whichever machine.
+  await writeFile(path.join(target, path.basename(zipFile)), await readFile(zipFile));
+  return target;
+}
+
 async function sizeOf(dir) {
   let total = 0;
   for (const entry of await readdir(dir, { withFileTypes: true })) {
@@ -106,11 +157,14 @@ execFileSync('tar', ['-a', '-c', '-f', zipPath, '-C', stageDir, ...INCLUDE], { s
 
 const unpacked = await sizeOf(stageDir);
 const packed = (await stat(zipPath)).size;
+
+const mirroredTo = await mirror(stageDir, zipPath);
 await rm(stageDir, { recursive: true, force: true });
 
 const mb = (bytes) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 console.log(`\nwrote dist/${zipName}`);
 console.log(`  packed ${mb(packed)}, unpacked ${mb(unpacked)}`);
 console.log(`  AI upscaler: ${aiIncluded ? 'included' : 'not included'}`);
+if (mirroredTo) console.log(`  mirrored to ${mirroredTo}`);
 if (packed > 100 * 1024 * 1024) console.warn('  warning: the Chrome Web Store limit is 100 MB');
 console.log('\nNext: see STORE.md — publishing needs your Google account, so it is a manual step.');

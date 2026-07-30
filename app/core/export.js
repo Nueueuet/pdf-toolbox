@@ -161,10 +161,10 @@ async function drawAnnotOnPage(pdfPage, annot, mapper, embedFont) {
   for (const line of layout.lines) {
     if (!line.text) continue;
 
-    if (annot.highlight) {
+    for (const strip of line.highlights) {
       pdfPage.drawRectangle({
-        ...rotatedRect(toUser, line.hl.dx, line.hl.dy, line.hl.w, line.hl.h, drawRotate),
-        color: toRgb(annot.highlight),
+        ...rotatedRect(toUser, strip.dx, strip.dy, strip.w, strip.h, drawRotate),
+        color: toRgb(strip.color),
         rotate: degrees(drawRotate),
         opacity,
       });
