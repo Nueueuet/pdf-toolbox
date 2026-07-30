@@ -61,6 +61,20 @@ export class PageEditor {
     await this.refresh();
   }
 
+  /**
+   * Points the editor at the current object for the page it is showing.
+   *
+   * Undo and redo restore *clones*, so the object the editor was holding stops
+   * being the one in the document. Without re-binding, everything after an undo
+   * would be edited into a copy nobody looks at.
+   */
+  async rebind(page) {
+    if (!page) return;
+    if (this.page?.id !== page.id) this.selectedId = null;
+    this.page = page;
+    await this.refresh();
+  }
+
   setMode(mode) {
     this.mode = mode;
     this.root.dataset.mode = mode;
@@ -203,15 +217,29 @@ export class PageEditor {
 
     // Deleting has to be reachable from the box itself: the text is always
     // editable, so Delete and Backspace belong to the caret, not to the box.
+    /*
+     * Deleting happens on pointerdown, not on click.
+     *
+     * Pressing the button blurs the text first, which commits the edit, which
+     * redraws the overlay — so by the time a click would fire, this button no
+     * longer exists and nothing happens. Acting on the press avoids that race
+     * entirely. The click handler stays for keyboard use, where there is no
+     * pointerdown at all.
+     */
+    let deleted = false;
+    const doDelete = (event) => {
+      event.stopPropagation();
+      if (deleted) return;
+      deleted = true;
+      this.handlers.onDeleteAnnot?.(annot);
+    };
+
     const remove = h('button.abox__delete', {
       type: 'button',
       title: 'Delete this text box',
       'aria-label': 'Delete this text box',
-      onpointerdown: (event) => event.stopPropagation(),
-      onclick: (event) => {
-        event.stopPropagation();
-        this.handlers.onDeleteAnnot?.(annot);
-      },
+      onpointerdown: doDelete,
+      onclick: doDelete,
     }, icon([
       'M3 6h18',
       'M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2',
@@ -259,6 +287,22 @@ export class PageEditor {
     });
 
     return box;
+  }
+
+  /**
+   * Puts the caret in a box's text.
+   * @param {object} annot
+   * @param {{at?: 'end'|'all'}} opts
+   */
+  focusText(annot, { at = 'end' } = {}) {
+    const box = this.overlay.querySelector(`.abox[data-id="${annot.id}"]`);
+    const text = box?.querySelector('.abox__text');
+    if (!text) return;
+
+    this.select(annot.id);
+    text.focus({ preventScroll: true });
+    const length = readMarkedText(text).text.length;
+    restoreSelection(text, at === 'all' ? { start: 0, end: length } : { start: length, end: length });
   }
 
   /** True when the caret is inside the selected box's text. */
@@ -340,7 +384,16 @@ export class PageEditor {
     // The middle of a box belongs to the text: a press there places the caret or
     // starts a selection. Only the band around the border, and the handles, move
     // or resize the box.
-    if (!dir && !isNearEdge(event, box)) return;
+    if (!dir && !isNearEdge(event, box)) {
+      // Landing on a glyph lets the browser put the caret exactly there. Landing
+      // on the empty part of the box would otherwise do nothing at all, so the
+      // caret goes after the last character and typing can simply continue.
+      if (!event.target.closest('.abox__text')) {
+        event.preventDefault();
+        this.focusText(annot, { at: 'end' });
+      }
+      return;
+    }
 
     event.preventDefault();
     event.stopPropagation();

@@ -124,6 +124,9 @@ export class PageGrid {
     } else {
       for (const [index, page] of this.ws.pages.entries()) cards.appendChild(this.card(page, index));
     }
+    // Adding more is the one thing the grid could not do without going back to
+    // the toolbar, so the slot after the last page offers it in place.
+    cards.appendChild(this.addCard());
     this.root.appendChild(cards);
 
     this.root.scrollTop = scroll;
@@ -170,6 +173,27 @@ export class PageGrid {
 
     this.queue.push({ page, shell });
     return card;
+  }
+
+  /** The "add more files" slot that closes out the grid, page-shaped. */
+  addCard() {
+    const last = this.ws.pages[this.ws.pages.length - 1];
+    const { w, h: ph } = last ? pageSize(last) : { w: 595, h: 842 };
+
+    return h('button.addcard', {
+      type: 'button',
+      title: 'Add PDFs or images to this document',
+      onclick: () => this.handlers.onCommand('add-files', {}),
+    },
+      // Mirrors the page card's frame/shell nesting so both end up the same
+      // height in the row.
+      h('span.addcard__frame',
+        h('span.addcard__shell', { style: { aspectRatio: `${w} / ${ph}` } },
+          svgIcon(['M12 5v14', 'M5 12h14'], 1.6),
+          h('span.addcard__label', 'Add files'),
+        ),
+      ),
+    );
   }
 
   // ------------------------------------------------------------- file cards

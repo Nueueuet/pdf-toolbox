@@ -146,7 +146,8 @@ const write = {
       const annot = makeAnnot({ text: 'New text', x: 0.12, y: 0.12, w: 0.45, h: 0.1 });
       ctx.commit('Add text', () => page.annots.push(annot));
       ctx.editor.drawOverlay();
-      ctx.editor.select(annot.id);
+      // Placeholder pre-selected, so the first keystroke replaces it.
+      ctx.editor.focusText(annot, { at: 'all' });
     };
 
     const duplicateToPages = async () => {
@@ -280,7 +281,9 @@ const stamps = {
       const annot = makeAnnot({ ...stamp.annot, role: 'stamp', stampId: stamp.id });
       ctx.commit(`Insert ${stamp.name}`, () => page.annots.push(annot));
       ctx.editor.drawOverlay();
-      ctx.editor.select(annot.id);
+      // A stamp arrives with its wording already right, so the caret goes to the
+      // end rather than selecting it all.
+      ctx.editor.focusText(annot, { at: 'end' });
     };
 
     const rename = async (stamp) => {
@@ -365,7 +368,8 @@ const watermark = {
   id: 'watermark',
   label: 'Watermark',
   group: 'Content',
-  mode: 'grid',
+  // Works from the grid or from a single page, so it leaves the current view be.
+  mode: 'any',
   icon: 'M12 3s6 6 6 10a6 6 0 0 1-12 0c0-4 6-10 6-10Z',
   blurb: 'Stamp text across pages, or strip watermarks that are already there.',
   panel(ctx) {
@@ -484,7 +488,8 @@ const background = {
   id: 'background',
   label: 'Background',
   group: 'Content',
-  mode: 'grid',
+  // Works from the grid or from a single page, so it leaves the current view be.
+  mode: 'any',
   icon: 'M3 3h18v18H3z M3 15l5-5 4 4 3-3 6 6',
   blurb: 'Replace or clear the page background — useful for greying scans and dark-mode exports.',
   panel(ctx) {

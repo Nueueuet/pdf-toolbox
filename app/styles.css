@@ -623,6 +623,51 @@ button { font: inherit; }
 .grid.is-cutdragging { cursor: grabbing; }
 .grid.is-cutdragging .cutmark.is-active .cutmark__grip { background: var(--danger); color: #fff; }
 
+/* Sits in the slot after the last page and matches its shape. */
+.addcard {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+}
+
+.addcard__frame {
+  display: block;
+  /* One pixel less than the page card's 8px, to allow for the thicker border. */
+  padding: 7px;
+  width: 100%;
+  border: 2px dashed #cfdbe6;
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, .55);
+  color: var(--ink-faint);
+  transition: border-color .14s, color .14s, background .14s;
+}
+
+.addcard__shell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.addcard__frame svg { width: 26px; height: 26px; }
+.addcard__label { font-size: 12.5px; font-weight: 600; }
+
+.addcard:hover .addcard__frame,
+.addcard:focus-visible .addcard__frame {
+  border-color: var(--blue);
+  color: var(--blue-dark);
+  background: var(--blue-soft);
+}
+
+/* Nothing to add while picking text, and it would only invite a stray click. */
+.grid.is-textmode .addcard { display: none; }
+
 .grid.is-dragging .pcard { cursor: grabbing; }
 
 .pcard.is-dropbefore .pcard__frame { box-shadow: -3px 0 0 var(--blue), var(--shadow-md); }
@@ -721,7 +766,16 @@ button { font: inherit; }
   cursor: text;
   outline: 1px dashed rgba(13, 139, 242, .55);
   outline-offset: -1px;
+  z-index: 1;
 }
+
+/*
+ * The box being worked on comes to the front, together with its delete button —
+ * which sits outside the box and would otherwise end up behind a neighbouring
+ * text box, so pressing it would land in that other box instead.
+ */
+.abox.is-selected { z-index: 10; }
+.abox__delete { z-index: 11; }
 
 .abox.is-edge { cursor: move; }
 .abox:hover { outline-color: var(--blue); }

@@ -18,9 +18,17 @@ import { progressToast, toast } from '../ui/toast.js';
  * grid and the panel never disagree about what is about to be edited.
  */
 function pageScope(ctx, { label = 'Pages' } = {}) {
+  /*
+   * Looking at a single page makes that page the obvious default — but only the
+   * default. The field still takes `all` or any range, so a tool opened from the
+   * single-page view can still act on the whole document.
+   */
+  const current = ctx.app.mode === 'page' ? ctx.currentPage() : null;
   const initial = ctx.ws.selection.size
     ? formatRange([...ctx.ws.selection].map((id) => ctx.ws.indexOf(id) + 1))
-    : 'all';
+    : current
+      ? String(ctx.ws.indexOf(current.id) + 1)
+      : 'all';
   const control = rangeField({ value: initial });
 
   const resolve = () => {
@@ -38,7 +46,10 @@ function pageScope(ctx, { label = 'Pages' } = {}) {
   });
   ctx.onClose(off);
 
-  return { el: field(label, control, 'Examples: all · 1-10 · 1,4,10 · odd · last'), resolve };
+  return {
+    el: field(label, control, 'Type “all” for the whole document, or a range: 1-10 · 1,4,10 · odd · last'),
+    resolve,
+  };
 }
 
 // ------------------------------------------------------------------- merge

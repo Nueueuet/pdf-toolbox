@@ -22,6 +22,7 @@ class App {
     this.ws = new Workspace();
     this.activeToolId = null;
     this.currentPageId = null;
+    this.surface = 'grid';
     this.panelCleanups = [];
     this.annotListeners = [];
 
@@ -324,9 +325,13 @@ class App {
 
   // ------------------------------------------------------------------ state
 
+  /**
+   * Which surface is actually on screen. Tracked rather than derived from the
+   * active tool, because a tool declared `mode: 'any'` works on either and must
+   * not change what is being shown.
+   */
   get mode() {
-    const tool = TOOLS.find((t) => t.id === this.activeToolId);
-    return tool?.mode === 'page' && this.currentPageId ? 'page' : 'grid';
+    return this.surface === 'page' && this.currentPageId ? 'page' : 'grid';
   }
 
   currentPage() {
@@ -353,7 +358,7 @@ class App {
     }
 
     this.grid.render();
-    if (this.mode === 'page') this.editor.refresh();
+    if (this.mode === 'page') this.editor.rebind(this.currentPage());
     this.syncSelectionStatus();
     this.syncHistoryButtons();
   }
@@ -405,6 +410,9 @@ class App {
     if (tool.mode === 'page') {
       this.currentPageId = (page ?? this.currentPage())?.id ?? null;
       this.showEditor(tool.editorMode ?? 'select');
+    } else if (tool.mode === 'any' && this.mode === 'page') {
+      // Works on either surface, so leave the one the user is looking at.
+      this.editor.setMode('select');
     } else {
       this.showGrid();
     }
@@ -463,6 +471,7 @@ class App {
       this.selectTool('merge');
       return;
     }
+    this.surface = 'grid';
     this.el.grid.hidden = false;
     this.el.editor.hidden = true;
     this.el.wsbar.hidden = false;
@@ -471,6 +480,7 @@ class App {
   }
 
   showEditor(editorMode) {
+    this.surface = 'page';
     this.el.grid.hidden = true;
     this.el.editor.hidden = false;
     this.el.wsbar.hidden = true;
@@ -551,6 +561,9 @@ class App {
         this.ws.commit('Reorder files', () => {
           this.ws.moveFile(payload.srcId, payload.targetSrcId, payload.after);
         });
+        break;
+      case 'add-files':
+        this.pickFiles();
         break;
       case 'remove-file': {
         const pages = this.ws.pages.filter((p) => p.srcId === payload.srcId);
