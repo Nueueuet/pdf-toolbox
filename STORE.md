@@ -77,7 +77,6 @@ EDIT
 
 CONVERT
 • PNG, JPG or CSV
-• Turn any web page into a PDF
 
 SECURITY
 • Add a password and set permissions, or save an unprotected copy
@@ -151,30 +150,8 @@ only to write these results to the user's own download folder under a meaningful
 filename. Nothing is downloaded from the internet.
 ```
 
-`debugger` *(optional — requested at point of use, never at install time)*
-
-```
-Used only by the optional "URL to PDF" feature. Chrome's page-to-PDF renderer
-(Page.printToPDF) is reachable only through the DevTools protocol, so there is no
-other way to offer it. When the user types a URL and starts the capture, the
-extension opens that URL in a background tab it creates itself, attaches the
-debugger to that one tab, calls Page.printToPDF, then immediately detaches and
-closes the tab. It never attaches to tabs the user opened, never reads page
-content, and never stays attached. Users who do not use this feature are never
-asked for the permission and never grant it.
-```
-
-Host permissions *(optional)*
-
-```
-Requested only when the user runs "URL to PDF", and only for the address they
-typed in, so that the background tab can load that page for printing.
-```
-
-> The `debugger` permission draws extra review scrutiny — expect a slower first
-> review. If you would rather avoid that entirely, remove `debugger` from
-> `optional_permissions` in `manifest.json` and drop the URL → PDF tool from
-> `app/tools/convert.js`; nothing else depends on it.
+That is the complete list. The extension requests **no host permissions at all**,
+which is worth pointing out in the listing: it cannot see any website you visit.
 
 ### Screenshots
 
@@ -187,7 +164,9 @@ You need at least one, at 1280×800 or 640×400. Good ones to take:
 
 ## 4. Submit
 
-Review usually takes a few days; the `debugger` permission may make it longer.
+Review usually takes a few days. The extension asks only for `storage`,
+`unlimitedStorage` and `downloads`, none of which are sensitive, so there is
+nothing here that typically drags a review out.
 
 ## Until it is published
 

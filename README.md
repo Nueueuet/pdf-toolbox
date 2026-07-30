@@ -66,7 +66,6 @@ npm run vendor:ai
 | Tool | What it does |
 | --- | --- |
 | Convert | PNG or JPG (one image per page, at 96–600 dpi) or CSV (text laid out as rows and columns). |
-| URL → PDF | Saves any web page as a PDF using Chrome's own print engine. |
 
 **Security**
 
@@ -102,10 +101,6 @@ These are limits worth knowing before you rely on the tool, not bugs:
 - **Text boxes use the 14 standard PDF fonts** (Helvetica, Times, Courier, with
   bold and italic). Characters outside Latin-1 are replaced rather than dropping
   the export.
-- **URL → PDF only works in the installed extension**, because it drives Chrome's
-  print engine through the DevTools protocol. It asks for the `debugger`
-  permission the first time you use it, and captures the page as a fresh tab sees
-  it — so pages behind a login may render logged out.
 
 ## Publishing
 
@@ -147,8 +142,8 @@ npm run dev      # serves the app at http://localhost:5175
 npm run check    # verifies the manifest and every import resolves
 ```
 
-Everything except `URL → PDF` behaves identically on the dev server, which is
-much faster to iterate on than reloading the extension.
+The dev server behaves just like the extension and is much faster to iterate on
+than reloading it.
 
 ### Tests
 
@@ -170,7 +165,7 @@ the wrong place on `/Rotate 90` pages — while looking perfectly fine at 0° an
 
 ```
 manifest.json          MV3 manifest; no popup, the icon opens app/index.html
-background/            service worker: opens the tab, and drives Page.printToPDF
+background/            service worker: opens (or focuses) the workspace tab
 app/
   core/
     workspace.js       the document model every tool reads and writes

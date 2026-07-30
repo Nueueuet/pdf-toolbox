@@ -1,4 +1,4 @@
-/** Convert (CSV / PNG / JPG) and URL → PDF. */
+/** Convert: pages out as CSV, PNG or JPG. */
 import { h } from '../util/dom.js';
 import { section, field, hint, primary, buttonRow, select, radioCards, checkbox, textInput, slider } from '../ui/controls.js';
 import { renderPageCanvas } from '../core/render.js';
@@ -7,7 +7,6 @@ import { saveFile, saveMany } from '../core/download.js';
 import { baseName, formatBytes } from '../util/format.js';
 import { progressToast, toast } from '../ui/toast.js';
 import { pageScope } from './organize.js';
-import { IN_EXTENSION } from '../core/paths.js';
 
 const convert = {
   id: 'convert',
@@ -130,109 +129,4 @@ const convert = {
   },
 };
 
-// ------------------------------------------------------------- url to pdf
-
-const urlToPdf = {
-  id: 'url',
-  label: 'URL → PDF',
-  group: 'Convert',
-  mode: 'grid',
-  icon: 'M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1 M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1',
-  blurb: 'Save any web page as a PDF, using Chrome’s own print engine.',
-  panel(ctx) {
-    const url = textInput({ placeholder: 'https://example.com/article' });
-    const paper = select({
-      value: 'a4',
-      options: [
-        { value: 'a4', label: 'A4' },
-        { value: 'letter', label: 'Letter' },
-        { value: 'a3', label: 'A3' },
-      ],
-    });
-    const landscape = checkbox({ label: 'Landscape' });
-    const background = checkbox({ label: 'Include background colours and images', checked: true });
-    const margin = select({
-      value: '0.4',
-      options: [
-        { value: '0', label: 'No margin' },
-        { value: '0.4', label: 'Normal margin' },
-        { value: '0.8', label: 'Wide margin' },
-      ],
-    });
-    const openAfter = checkbox({ label: 'Add to the workspace instead of downloading', checked: true });
-
-    const PAPER = {
-      a4: [8.27, 11.69],
-      letter: [8.5, 11],
-      a3: [11.69, 16.54],
-    };
-
-    const run = async () => {
-      const target = url.value.trim();
-      if (!target) return toast('Enter a URL first', { tone: 'error' });
-
-      let parsed;
-      try {
-        parsed = new URL(/^https?:\/\//i.test(target) ? target : `https://${target}`);
-      } catch {
-        return toast('That does not look like a URL', { tone: 'error' });
-      }
-
-      if (!IN_EXTENSION) {
-        return toast('URL → PDF needs the installed extension — Chrome’s print engine is not reachable from a plain page.', { tone: 'error', timeout: 9000 });
-      }
-
-      // The debugger permission is only requested when the feature is used.
-      const granted = await chrome.permissions.request({
-        permissions: ['debugger'],
-        origins: [`${parsed.origin}/*`],
-      }).catch(() => false);
-      if (!granted) return toast('Permission denied — cannot capture the page', { tone: 'error' });
-
-      const [width, height] = PAPER[paper.value];
-      const progress = progressToast(`Loading ${parsed.hostname}…`);
-      try {
-        const response = await chrome.runtime.sendMessage({
-          type: 'url-to-pdf',
-          url: parsed.href,
-          options: {
-            paperWidth: width,
-            paperHeight: height,
-            landscape: landscape.checked,
-            printBackground: background.checked,
-            margin: Number(margin.value),
-          },
-        });
-        if (!response?.ok) throw new Error(response?.error ?? 'Capture failed');
-
-        const bytes = base64ToBytes(response.base64);
-        const name = `${parsed.hostname}${parsed.pathname.replace(/\/+$/, '').replace(/\//g, '-')}.pdf`;
-        if (openAfter.checked) {
-          await ctx.ws.addBytes(bytes, name);
-          progress.done(`Added ${name}`);
-        } else {
-          await saveFile(bytes, name);
-          progress.done(`Saved ${name}`);
-        }
-      } catch (err) {
-        console.error(err);
-        progress.fail(`Could not capture the page: ${err.message}`);
-      }
-    };
-
-    return h('div',
-      section('Address', field(null, url), hint('Pages behind a login are captured as Chrome sees them in a fresh tab, so private pages may render logged out.')),
-      section('Paper', field('Size', paper), landscape, field('Margins', margin), background),
-      section(null, buttonRow(primary('Capture page', { onclick: run })), openAfter),
-    );
-  },
-};
-
-function base64ToBytes(base64) {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes;
-}
-
-export default [convert, urlToPdf];
+export default [convert];

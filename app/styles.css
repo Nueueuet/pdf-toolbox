@@ -349,6 +349,31 @@ button { font: inherit; }
   z-index: -1;
 }
 
+.filecard__remove {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, .94);
+  color: var(--danger);
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  opacity: 0;
+  transition: opacity .12s, background .12s, color .12s;
+  z-index: 2;
+}
+
+.filecard__remove svg { width: 15px; height: 15px; }
+.filecard:hover .filecard__remove,
+.filecard:focus-within .filecard__remove { opacity: 1; }
+.filecard__remove:hover { background: var(--danger); color: #fff; }
+
 .filecard__count {
   position: absolute;
   top: 14px;
@@ -604,10 +629,61 @@ button { font: inherit; }
   height: 100%;
 }
 
+/*
+ * Transparent, selectable text over the page bitmap, positioned by pdf.js.
+ * Mirrors what Chrome's own viewer does: the canvas is only pixels, so without
+ * this layer there is nothing on the page to select or copy.
+ */
+.textlayer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  overflow: hidden;
+  line-height: 1;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  caret-color: CanvasText;
+  z-index: 1;
+}
+
+.textlayer span,
+.textlayer br {
+  position: absolute;
+  color: transparent;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0 0;
+}
+
+.textlayer ::selection { background: rgba(13, 139, 242, .3); }
+
+/* pdf.js marks the end of the text with this; it must not be selectable. */
+.textlayer .endOfContent {
+  position: absolute;
+  inset: 100% 0 0;
+  display: block;
+  cursor: default;
+  user-select: none;
+}
+
+.textlayer.is-selecting .endOfContent { inset: 0; }
+
+/*
+ * Clicks pass through the annotation layer so the text underneath stays
+ * selectable; the boxes themselves take their events back.
+ */
 .editor__overlay {
   position: absolute;
-  inset: 0;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  z-index: 2;
+  pointer-events: none;
 }
+
+.editor__overlay .abox,
+.editor__overlay .crop__layer { pointer-events: auto; }
 
 /*
  * The middle of a box is text; only the band around the border moves it. The
@@ -649,9 +725,35 @@ button { font: inherit; }
   border-radius: 2px;
   background: #fff;
   opacity: 0;
+  /* The layer is scaled to the page zoom; undo that so grips stay grabbable. */
+  transform: scale(var(--inv-scale, 1));
 }
 
 .abox.is-selected .abox__handle { opacity: 1; }
+
+.abox__delete {
+  position: absolute;
+  top: -11px;
+  right: -11px;
+  display: none;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--danger);
+  border-radius: 50%;
+  background: #fff;
+  color: var(--danger);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transform: scale(var(--inv-scale, 1));
+  transform-origin: center;
+}
+
+.abox.is-selected .abox__delete { display: grid; }
+.abox__delete:hover { background: var(--danger); color: #fff; }
 
 .abox__handle[data-dir="nw"] { top: -5px; left: -5px; cursor: nwse-resize; }
 .abox__handle[data-dir="n"]  { top: -5px; left: calc(50% - 4px); cursor: ns-resize; }

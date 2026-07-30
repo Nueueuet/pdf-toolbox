@@ -223,14 +223,31 @@ const remove = {
     const scope = pageScope(ctx, { label: 'Pages to remove' });
     const bin = h('div.bin');
 
+    /**
+     * Mirrors whichever view the workspace is showing: removing a file in the
+     * Files view should give back a file, not a heap of loose pages.
+     */
     const renderBin = () => {
       clear(bin);
       if (ctx.ws.removed.length === 0) {
         bin.appendChild(hint('Nothing removed yet.'));
         return;
       }
+
+      const byFile = ctx.grid.view === 'files';
+      const groups = byFile ? groupRemovedByFile(ctx.ws) : ctx.ws.removed.map((page) => ({
+        key: page.id,
+        pages: [page],
+        title: ctx.ws.source(page)?.name ?? 'page',
+        subtitle: `was page ${(page.meta.removedFrom ?? 0) + 1}`,
+      }));
+
+      const noun = byFile
+        ? `${groups.length} ${groups.length === 1 ? 'file' : 'files'}`
+        : `${ctx.ws.removed.length} ${ctx.ws.removed.length === 1 ? 'page' : 'pages'}`;
+
       bin.appendChild(h('div.bin__head',
-        h('span', `${ctx.ws.removed.length} removed`),
+        h('span', `${noun} removed`),
         h('button.linkbtn', { type: 'button', onclick: restoreAll }, 'Restore all'),
         h('button.linkbtn.is-danger', {
           type: 'button',
@@ -238,28 +255,36 @@ const remove = {
         }, 'Discard'),
       ));
 
-      for (const page of ctx.ws.removed) {
+      for (const group of groups) {
         const thumb = h('div.bin__thumb');
-        const source = ctx.ws.source(page);
         bin.appendChild(h('div.bin__row', thumb,
           h('div.bin__meta',
-            h('span.bin__name', source?.name ?? 'page'),
-            h('span.bin__sub', `was page ${(page.meta.removedFrom ?? 0) + 1}`),
+            h('span.bin__name', group.title),
+            h('span.bin__sub', group.subtitle),
           ),
-          h('button.linkbtn', { type: 'button', onclick: () => restore(page) }, 'Put back'),
+          h('button.linkbtn', { type: 'button', onclick: () => restoreMany(group.pages) }, 'Put back'),
         ));
 
-        renderPageCanvas(ctx.ws, page, { scale: 0.16 })
+        renderPageCanvas(ctx.ws, group.pages[0], { scale: 0.16 })
           .then(({ canvas }) => { if (thumb.isConnected) thumb.replaceChildren(canvas); })
           .catch(() => {});
       }
     };
 
-    const restore = (page) => ctx.commit('Restore page', () => {
-      ctx.ws.removed = ctx.ws.removed.filter((p) => p.id !== page.id);
-      const at = Math.min(page.meta.removedFrom ?? ctx.ws.pages.length, ctx.ws.pages.length);
-      ctx.ws.pages.splice(at, 0, page);
-    });
+    const restoreMany = (pages) => ctx.commit(
+      pages.length === 1 ? 'Restore page' : `Restore ${pages.length} pages`,
+      () => {
+        const ids = new Set(pages.map((p) => p.id));
+        ctx.ws.removed = ctx.ws.removed.filter((p) => !ids.has(p.id));
+        // Reinstated in their original order, so each index still means
+        // something by the time the next page is put back.
+        const ordered = [...pages].sort((a, b) => (a.meta.removedFrom ?? 0) - (b.meta.removedFrom ?? 0));
+        for (const page of ordered) {
+          const at = Math.min(page.meta.removedFrom ?? ctx.ws.pages.length, ctx.ws.pages.length);
+          ctx.ws.pages.splice(at, 0, page);
+        }
+      },
+    );
 
     const restoreAll = () => ctx.commit('Restore all pages', () => {
       // Reinstate in original order so indices stay meaningful as we go.
@@ -273,6 +298,7 @@ const remove = {
 
     renderBin();
     ctx.onClose(ctx.ws.on('pages', renderBin));
+    ctx.onClose(ctx.ws.on('view', renderBin));
 
     const run = () => {
       const pages = scope.resolve();
@@ -410,6 +436,27 @@ const crop = {
     );
   },
 };
+
+/** Removed pages bundled back into the files they came from. */
+function groupRemovedByFile(ws) {
+  const groups = new Map();
+  for (const page of ws.removed) {
+    if (!groups.has(page.srcId)) groups.set(page.srcId, []);
+    groups.get(page.srcId).push(page);
+  }
+  return [...groups.entries()].map(([srcId, pages]) => {
+    const source = ws.sources.get(srcId);
+    const whole = source && pages.length === source.pageCount;
+    return {
+      key: srcId,
+      pages,
+      title: source?.name ?? 'file',
+      subtitle: whole
+        ? `whole file · ${pages.length} ${pages.length === 1 ? 'page' : 'pages'}`
+        : `${pages.length} of ${source?.pageCount ?? '?'} pages`,
+    };
+  });
+}
 
 export default [merge, split, remove, rotate, crop];
 export { pageScope };

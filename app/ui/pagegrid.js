@@ -48,6 +48,8 @@ export class PageGrid {
 
   setView(view) {
     this.view = view;
+    // Announced so panels that show pages or files can follow the main view.
+    this.ws.emit('view', view);
     this.render();
   }
 
@@ -137,6 +139,16 @@ export class PageGrid {
     const shell = h('div.pcard__shell', { style: { aspectRatio: `${w} / ${ph}` } });
     const count = group.pages.length;
 
+    const remove = h('button.filecard__remove', {
+      type: 'button',
+      title: `Remove ${group.source?.name ?? 'this file'}`,
+      'aria-label': `Remove ${group.source?.name ?? 'this file'}`,
+      onclick: (event) => {
+        event.stopPropagation();
+        this.handlers.onCommand('remove-file', { srcId: group.srcId });
+      },
+    }, svgIcon(['M3 6h18', 'M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2', 'M19 6l-1 13a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6']));
+
     const card = h('div.filecard', {
       dataset: { src: group.srcId },
       draggable: 'true',
@@ -144,6 +156,7 @@ export class PageGrid {
       title: group.source?.name ?? '',
     },
       h('div.pcard__frame', shell,
+        remove,
         h('span.filecard__count', `${count} ${count === 1 ? 'page' : 'pages'}`),
       ),
       h('div.filecard__name', group.source?.name ?? 'Unknown file'),

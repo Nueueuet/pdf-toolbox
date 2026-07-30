@@ -27,11 +27,10 @@ extension removes it.
 | --- | --- |
 | `storage`, `unlimitedStorage` | Saving your stamps, and letting the workspace hold large documents in memory. |
 | `downloads` | Saving the PDFs, images and CSV files you export. |
-| `debugger` *(optional)* | Only for **URL → PDF**. Chrome's page-to-PDF printer is reachable only through the DevTools protocol, so the extension attaches to a background tab, prints it, and detaches. It is requested the first time you use that feature and never at install time. If you never use URL → PDF, it is never granted. |
-| Host access *(optional)* | Only for **URL → PDF**, and only for the address you type in. Requested at the moment you use it. |
 
-The extension has no content scripts, so it never runs code on the pages you
-visit and never reads their contents.
+That is the whole list. The extension asks for **no access to any website**, and
+it has no content scripts, so it never runs code on the pages you visit and never
+sees their contents.
 
 ## Contact
 

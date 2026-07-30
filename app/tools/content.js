@@ -188,13 +188,8 @@ const write = {
 
     const remove = () => {
       const annot = props.current;
-      const page = ctx.currentPage();
-      if (!annot || !page) return;
-      ctx.commit('Delete text', () => {
-        page.annots = page.annots.filter((a) => a.id !== annot.id);
-      });
-      ctx.editor.drawOverlay();
-      ctx.editor.select(null);
+      if (!annot) return toast('Select a text box first', { tone: 'error' });
+      ctx.app.deleteAnnot(annot);
     };
 
     const saveAsStamp = async () => {
@@ -322,6 +317,13 @@ const stamps = {
       render();
     };
 
+    /** Takes the placed copy off the page; the saved stamp itself is untouched. */
+    const removeFromPage = () => {
+      const annot = props.current;
+      if (!annot) return toast('Select a stamp on the page first', { tone: 'error' });
+      ctx.app.deleteAnnot(annot);
+    };
+
     const saveCurrent = async () => {
       const annot = props.current;
       if (!annot) return toast('Select a text box on the page first', { tone: 'error' });
@@ -351,6 +353,7 @@ const stamps = {
       section(null, buttonRow(
         primary('Save selection as new stamp', { onclick: saveCurrent }),
         button('Update its stamp', { onclick: updateStamp, title: 'Write the current styling back to the stamp it came from' }),
+        button('Delete from page', { tone: 'danger', onclick: removeFromPage }),
       )),
     );
   },

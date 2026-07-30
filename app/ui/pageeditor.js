@@ -10,8 +10,9 @@ import { h, clear } from '../util/dom.js';
 import { renderPageCanvas } from '../core/render.js';
 import { cssFamilyFor } from '../core/fonts.js';
 import { normalizeMarks } from '../core/annots.js';
-import { normalizeCrop } from '../core/geometry.js';
+import { normalizeCrop, totalQuarter } from '../core/geometry.js';
 import { clamp } from '../util/format.js';
+import { TextLayer } from '../../vendor/pdf.mjs';
 
 const HANDLES = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
 
@@ -33,13 +34,18 @@ export class PageEditor {
 
     this.stage = h('div.editor__stage');
     this.canvasHost = h('div.editor__canvas');
+    // Transparent, selectable copies of the page's words, sitting between the
+    // bitmap and the annotations — the same trick Chrome's own PDF viewer uses.
+    this.textHost = h('div.textlayer');
     this.overlay = h('div.editor__overlay');
-    this.stage.append(this.canvasHost, this.overlay);
+    this.stage.append(this.canvasHost, this.textHost, this.overlay);
     this.viewport = h('div.editor__viewport', this.stage);
     clear(root).appendChild(this.viewport);
 
-    this.overlay.addEventListener('pointerdown', (event) => {
-      if (event.target === this.overlay) this.select(null);
+    // The overlay lets clicks through so text underneath stays selectable, so
+    // "click the page to deselect" has to be caught on the stage instead.
+    this.stage.addEventListener('pointerdown', (event) => {
+      if (!event.target.closest('.abox')) this.select(null);
     });
     this.onResize = () => this.fit();
     window.addEventListener('resize', this.onResize);
@@ -91,27 +97,88 @@ export class PageEditor {
     });
     if (token !== this.renderToken) return;
 
+    // Two sizes matter, and conflating them is what made cropped pages look
+    // stretched: the stage shows the *visible window*, while annotations and the
+    // text layer are laid out against the *whole page* and shifted into place.
+    this.viewWidth = mapper.outWidth;
+    this.viewHeight = mapper.outHeight;
     this.pageWidth = mapper.displayWidth;
     this.pageHeight = mapper.displayHeight;
+    this.window = mapper.window;
     canvas.className = 'editor__bitmap';
     clear(this.canvasHost).appendChild(canvas);
 
     this.fit();
     this.drawOverlay();
+    this.buildTextLayer(pageForRender, token).catch((err) => console.error('text layer failed', err));
   }
 
-  /** Sizes the stage so the page fits the available area. */
+  /**
+   * Lays the page's text over the bitmap so it can be selected and copied.
+   *
+   * Only source PDFs have text to offer: a page that has been rasterised by
+   * compression or upscaling is a picture, and a scan never had any.
+   */
+  async buildTextLayer(page, token) {
+    clear(this.textHost);
+    const source = this.ws.source(page);
+    if (source?.kind !== 'pdf' || page.rasterId) return;
+
+    const pdfPage = await source.doc.getPage(page.srcIndex + 1);
+    if (token !== this.renderToken) return;
+
+    // Built at scale 1 and then scaled with a CSS transform, so resizing the
+    // window is a transform change rather than a full re-layout of every word.
+    const viewport = pdfPage.getViewport({ scale: 1, rotation: totalQuarter(page) });
+    this.textHost.style.setProperty('--scale-factor', '1');
+    this.textHost.style.width = `${viewport.width}px`;
+    this.textHost.style.height = `${viewport.height}px`;
+
+    const layer = new TextLayer({
+      textContentSource: pdfPage.streamTextContent(),
+      container: this.textHost,
+      viewport,
+    });
+    await layer.render();
+    if (token !== this.renderToken) {
+      clear(this.textHost);
+      return;
+    }
+    this.placeLayers();
+  }
+
+  /** Sizes the stage so the visible part of the page fits the available area. */
   fit() {
-    if (!this.pageWidth) return;
+    if (!this.viewWidth) return;
     const box = this.viewport.getBoundingClientRect();
     const padding = 48;
     const scale = Math.min(
-      (box.width - padding) / this.pageWidth,
-      (box.height - padding) / this.pageHeight,
+      (box.width - padding) / this.viewWidth,
+      (box.height - padding) / this.viewHeight,
     );
     this.scale = Math.max(0.05, scale || 0.5);
-    this.stage.style.width = `${this.pageWidth * this.scale}px`;
-    this.stage.style.height = `${this.pageHeight * this.scale}px`;
+    this.stage.style.width = `${this.viewWidth * this.scale}px`;
+    this.stage.style.height = `${this.viewHeight * this.scale}px`;
+    this.placeLayers();
+  }
+
+  /**
+   * Text and annotations both live in full-page coordinates, so each layer is
+   * the size of the whole page and slid so the crop window lines up with the
+   * bitmap underneath.
+   */
+  placeLayers() {
+    const s = this.scale;
+    const win = this.window ?? { x: 0, y: 0 };
+    const transform = `translate(${-win.x * s}px, ${-win.y * s}px) scale(${s})`;
+    for (const layer of [this.textHost, this.overlay]) {
+      layer.style.width = `${this.pageWidth}px`;
+      layer.style.height = `${this.pageHeight}px`;
+      layer.style.transform = transform;
+    }
+    // Handles and the delete button are chrome, not content: they would shrink
+    // with the page otherwise and become unclickable at low zoom.
+    this.overlay.style.setProperty('--inv-scale', String(1 / s));
   }
 
   // -------------------------------------------------------------- overlay
@@ -134,10 +201,23 @@ export class PageEditor {
     const text = h('span.abox__text', { contenteditable: 'true', spellcheck: 'false' });
     renderMarkedText(text, annot);
 
+    // Deleting has to be reachable from the box itself: the text is always
+    // editable, so Delete and Backspace belong to the caret, not to the box.
+    const remove = h('button.abox__delete', {
+      type: 'button',
+      title: 'Delete this text box',
+      'aria-label': 'Delete this text box',
+      onpointerdown: (event) => event.stopPropagation(),
+      onclick: (event) => {
+        event.stopPropagation();
+        this.handlers.onDeleteAnnot?.(annot);
+      },
+    }, '×');
+
     const box = h('div.abox', {
       dataset: { id: annot.id },
       class: annot.id === this.selectedId ? 'is-selected' : '',
-    }, h('div.abox__inner', text), ...HANDLES.map((dir) => h('span.abox__handle', { dataset: { dir } })));
+    }, h('div.abox__inner', text), remove, ...HANDLES.map((dir) => h('span.abox__handle', { dataset: { dir } })));
 
     this.styleBox(box, annot);
 
@@ -180,7 +260,8 @@ export class PageEditor {
   }
 
   styleBox(box, annot) {
-    const s = this.scale;
+    // Sizes are in page points, not screen pixels: the whole layer is scaled by
+    // a CSS transform, so multiplying here as well would scale everything twice.
     Object.assign(box.style, {
       left: `${annot.x * 100}%`,
       top: `${annot.y * 100}%`,
@@ -189,8 +270,8 @@ export class PageEditor {
       transform: annot.rotate ? `rotate(${annot.rotate}deg)` : '',
       opacity: String(annot.opacity ?? 1),
       background: annot.bgColor ?? 'transparent',
-      border: annot.border?.width > 0 ? `${Math.max(1, annot.border.width * s)}px solid ${annot.border.color}` : '',
-      padding: `${(annot.padding ?? 0) * s}px`,
+      border: annot.border?.width > 0 ? `${annot.border.width}px solid ${annot.border.color}` : '',
+      padding: `${annot.padding ?? 0}px`,
     });
 
     const inner = box.querySelector('.abox__inner');
@@ -202,7 +283,7 @@ export class PageEditor {
     const text = box.querySelector('.abox__text');
     Object.assign(text.style, {
       fontFamily: cssFamilyFor(annot.family),
-      fontSize: `${annot.size * s}px`,
+      fontSize: `${annot.size}px`,
       lineHeight: String(annot.lineSpacing ?? 1.25),
       color: annot.color,
       fontWeight: annot.bold ? '700' : '400',
@@ -234,7 +315,9 @@ export class PageEditor {
     event.preventDefault();
     event.stopPropagation();
 
-    const rect = this.stage.getBoundingClientRect();
+    // Positions are fractions of the whole page, so the drag is measured against
+    // the page, not against the (possibly cropped) stage.
+    const rect = { width: this.pageWidth * this.scale, height: this.pageHeight * this.scale };
     const start = { x: event.clientX, y: event.clientY };
     const origin = { x: annot.x, y: annot.y, w: annot.w, h: annot.h };
 

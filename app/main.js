@@ -10,7 +10,7 @@ import { TOOLS, GROUPS } from './tools/index.js';
 import { buildPdf } from './core/export.js';
 import { saveFile } from './core/download.js';
 import { primeFontMetrics } from './core/fonts.js';
-import { passwordPrompt } from './ui/modal.js';
+import { passwordPrompt, modal } from './ui/modal.js';
 import { toast, progressToast } from './ui/toast.js';
 import { baseName, formatBytes } from './util/format.js';
 import { IN_EXTENSION } from './core/paths.js';
@@ -59,6 +59,7 @@ class App {
       onSelectAnnot: (annot) => {
         for (const listener of this.annotListeners) listener(annot);
       },
+      onDeleteAnnot: (annot) => this.deleteAnnot(annot),
     });
 
     this.buildRail();
@@ -66,6 +67,7 @@ class App {
     this.wireDropTarget();
     this.wireKeys();
 
+    this.guardAgainstReload();
     this.ws.on('pages', () => this.onPagesChanged());
     this.ws.on('history', () => this.syncHistoryButtons());
     this.ws.on('selection', () => this.syncSelectionStatus());
@@ -191,6 +193,20 @@ class App {
 
     this.el.docTitle.addEventListener('change', () => {
       this.ws.name = this.el.docTitle.value.trim() || 'document';
+    });
+  }
+
+  /**
+   * The workspace lives entirely in memory — nothing is written to disk until
+   * the user saves — so a reload or a closed tab throws the work away. Browsers
+   * only allow a generic confirmation here; the wording is theirs, not ours.
+   */
+  guardAgainstReload() {
+    window.addEventListener('beforeunload', (event) => {
+      if (this.ws.pageCount === 0) return;
+      event.preventDefault();
+      // Older browsers need returnValue set; the string itself is ignored.
+      event.returnValue = 'Your open document has not been saved.';
     });
   }
 
@@ -395,6 +411,21 @@ class App {
     }, 350);
   }
 
+  /** Removes a text box or stamp from the page it sits on. */
+  deleteAnnot(annot) {
+    const page = this.currentPage();
+    if (!page || !annot) return;
+    this.ws.commit(annot.role === 'stamp' ? 'Delete stamp' : 'Delete text box', () => {
+      page.annots = page.annots.filter((a) => a.id !== annot.id);
+    });
+    this.editor.drawOverlay();
+    this.editor.select(null);
+    toast('Deleted', {
+      tone: 'info',
+      action: { label: 'Undo', onClick: () => this.ws.undo() },
+    });
+  }
+
   onEditorChange(opts = {}) {
     if (opts.structural === false) return; // mid-drag, do not touch history
     this.scheduleThumbRefresh();
@@ -498,18 +529,28 @@ class App {
           this.ws.moveFile(payload.srcId, payload.targetSrcId, payload.after);
         });
         break;
+      case 'remove-file': {
+        const pages = this.ws.pages.filter((p) => p.srcId === payload.srcId);
+        const name = this.ws.sources.get(payload.srcId)?.name ?? 'file';
+        if (pages.length >= this.ws.pageCount) {
+          toast('That is the only file left', { tone: 'error' });
+          break;
+        }
+        this.removePages(pages, `Remove ${name}`);
+        break;
+      }
       default:
         console.warn('unknown grid command', name);
     }
   }
 
-  removePages(pages) {
+  removePages(pages, label) {
     if (pages.length === 0) return;
     if (pages.length >= this.ws.pageCount) {
       toast('At least one page has to stay', { tone: 'error' });
       return;
     }
-    this.ws.commit(`Remove ${pages.length} ${pages.length === 1 ? 'page' : 'pages'}`, () => {
+    this.ws.commit(label ?? `Remove ${pages.length} ${pages.length === 1 ? 'page' : 'pages'}`, () => {
       for (const page of pages) page.meta.removedFrom = this.ws.indexOf(page.id);
       const ids = new Set(pages.map((p) => p.id));
       this.ws.removed.push(...this.ws.pages.filter((p) => ids.has(p.id)));

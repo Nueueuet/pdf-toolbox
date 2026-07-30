@@ -375,6 +375,50 @@ test('wrapped lines report the character offsets highlights need', () => {
   assert(multi[1].start === 2, `offset after a newline: ${JSON.stringify(multi)}`);
 });
 
+test('page text can be selected and copied', async () => {
+  // The page is drawn to a canvas, which has no text in it at all. Selecting
+  // words only works because a transparent text layer is laid over the bitmap,
+  // so this checks the words are really there and really selectable.
+  const ws = await loadWorkspace(['report.pdf']);
+  const host = document.createElement('div');
+  host.style.cssText = 'position:fixed;left:0;top:0;width:900px;height:700px;opacity:0;z-index:9999';
+  document.body.appendChild(host);
+  const editor = new PageEditor(host, ws, { onChange: () => {}, onSelectAnnot: () => {} });
+
+  try {
+    await editor.open(ws.pages[0]);
+    // The text layer is built after the bitmap, so give it a moment to land.
+    for (let i = 0; i < 40 && host.querySelectorAll('.textlayer span').length === 0; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
+    const spans = host.querySelectorAll('.textlayer span');
+    assert(spans.length > 0, 'no selectable text was laid over the page');
+
+    const words = [...spans].map((s) => s.textContent).join(' ');
+    assert(words.includes('Quarterly report'), `the heading is missing: ${words.slice(0, 120)}`);
+    assert(words.includes('Region'), 'the table headings are missing');
+
+    // What the browser would actually put on the clipboard.
+    const range = document.createRange();
+    range.setStart(spans[0], 0);
+    range.setEnd(spans[Math.min(2, spans.length - 1)], spans[Math.min(2, spans.length - 1)].childNodes.length);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    const copied = selection.toString();
+    selection.removeAllRanges();
+    assert(copied.includes('Quarterly report'), `selection produced nothing useful: "${copied}"`);
+
+    // The glyphs must stay invisible — the canvas underneath is what is seen.
+    assert(getComputedStyle(spans[0]).color === 'rgba(0, 0, 0, 0)',
+      'the text layer is painting over the page');
+  } finally {
+    editor.destroy();
+    host.remove();
+  }
+});
+
 test('a text box moves from its edge, but takes a caret in the middle', async () => {
   const ws = await loadWorkspace(['invoice.pdf']);
   const page = ws.pages[0];
