@@ -6,7 +6,7 @@
  * keeps the canvas free to be the honest preview of what will be exported (the
  * grid thumbnails render the same page through the real pipeline).
  */
-import { h, clear } from '../util/dom.js';
+import { h, clear, icon } from '../util/dom.js';
 import { renderPageCanvas } from '../core/render.js';
 import { cssFamilyFor } from '../core/fonts.js';
 import { normalizeMarks } from '../core/annots.js';
@@ -212,7 +212,11 @@ export class PageEditor {
         event.stopPropagation();
         this.handlers.onDeleteAnnot?.(annot);
       },
-    }, '×');
+    }, icon([
+      'M3 6h18',
+      'M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2',
+      'M19 6l-1 13a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6',
+    ], { size: 13, stroke: 1.9 }));
 
     const box = h('div.abox', {
       dataset: { id: annot.id },

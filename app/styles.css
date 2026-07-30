@@ -731,27 +731,32 @@ button { font: inherit; }
 
 .abox.is-selected .abox__handle { opacity: 1; }
 
+/*
+ * Sits just above the box's top-right corner, clear of the text so it never
+ * covers a word. Anchored at that corner and counter-scaled, so it keeps the
+ * same size and the same small gap at any zoom.
+ */
 .abox__delete {
   position: absolute;
-  top: -11px;
-  right: -11px;
+  bottom: 100%;
+  right: 0;
   display: none;
   place-items: center;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   border: 1px solid var(--danger);
   border-radius: 50%;
   background: #fff;
   color: var(--danger);
-  font-size: 15px;
-  line-height: 1;
   cursor: pointer;
   box-shadow: var(--shadow-sm);
-  transform: scale(var(--inv-scale, 1));
-  transform-origin: center;
+  transform: translateY(-5px) scale(var(--inv-scale, 1));
+  transform-origin: bottom right;
+  transition: background .12s, color .12s;
 }
 
+.abox__delete svg { width: 13px; height: 13px; }
 .abox.is-selected .abox__delete { display: grid; }
 .abox__delete:hover { background: var(--danger); color: #fff; }
 
