@@ -70,13 +70,15 @@ OPTIMISE
 • Upscale — redraw pages at higher resolution, or run an ESRGAN model over scans
 
 EDIT
-• Write — text boxes with font, size, colour, highlight, fill, border and rotation
+• Write — text boxes with font, size, colour, fill, border and rotation
+• Highlight — mark the words you select, the way a word processor does
 • Stamps — save a styled text block and reuse it anywhere
 • Watermark — across the middle, tiled or in the footer, at any angle
 • Background — replace or clear the page background
 
 CONVERT
 • PNG, JPG or CSV
+• Copy text — select text straight off the pages, or copy whole pages at once
 
 SECURITY
 • Add a password and set permissions, or save an unprotected copy

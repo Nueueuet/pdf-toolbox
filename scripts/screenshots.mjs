@@ -49,6 +49,13 @@ const SCENES = [
     url: `/app/index.html?demo=compress&files=report.pdf&zoom=0.28`,
     caption: 'Compression levels with measured output sizes',
   },
+  {
+    file: 'screenshot-5-copytext.png',
+    width: 1280,
+    height: 800,
+    url: `/app/index.html?demo=copytext&zoom=0.3`,
+    caption: 'Selecting text straight off the pages',
+  },
   { file: 'promo-small-440x280.png', width: 440, height: 280, url: '/store-assets/promo.html?size=small', caption: 'Small promo tile' },
   { file: 'promo-large-1400x560.png', width: 1400, height: 560, url: '/store-assets/promo.html?size=large', caption: 'Large promo tile' },
 ];
