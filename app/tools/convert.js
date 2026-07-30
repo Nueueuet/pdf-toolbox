@@ -129,4 +129,64 @@ const convert = {
   },
 };
 
-export default [convert];
+/**
+ * Selecting text on the pages is its own mode for the same reason splitting is:
+ * it changes what a drag on a page means. Chrome switches selection off inside
+ * a draggable element, so reordering and selecting cannot both be live, and a
+ * mode makes which one is active something the user chose rather than guessed.
+ */
+const copyText = {
+  id: 'copytext',
+  label: 'Copy text',
+  group: 'Convert',
+  mode: 'grid',
+  icon: 'M9 3h9a2 2 0 0 1 2 2v9 M5 7h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Z',
+  blurb: 'Select text straight off the pages and copy it. Dragging pages to reorder is paused while this is open.',
+  panel(ctx) {
+    const scope = pageScope(ctx);
+    const status = h('p.hint');
+
+    const copyAll = async () => {
+      const pages = scope.resolve();
+      if (!pages) return;
+      if (pages.length === 0) return toast('No pages matched', { tone: 'error' });
+
+      const progress = progressToast('Reading text…');
+      try {
+        const chunks = [];
+        for (const [index, page] of pages.entries()) {
+          progress.update(index / pages.length, `Page ${index + 1} of ${pages.length}`);
+          const rows = await extractRows(ctx.ws, page);
+          if (rows.length === 0) continue;
+          if (pages.length > 1) chunks.push(`--- page ${ctx.ws.indexOf(page.id) + 1} ---`);
+          chunks.push(rows.map((cells) => cells.join(' ')).join('\n'));
+        }
+
+        if (chunks.length === 0) {
+          progress.fail('No text found — these pages are probably scans.');
+          return;
+        }
+
+        const text = chunks.join('\n\n');
+        await navigator.clipboard.writeText(text);
+        progress.done(`Copied ${text.length.toLocaleString()} characters`);
+      } catch (err) {
+        console.error(err);
+        progress.fail(`Could not copy: ${err.message}`);
+      }
+    };
+
+    status.textContent = 'Drag across the pages to select text, then copy it as usual. '
+      + 'Page reordering is paused until you leave this tool.';
+
+    return h('div',
+      section(null, status),
+      section('Copy everything', scope.el,
+        buttonRow(primary('Copy text to clipboard', { onclick: copyAll })),
+        hint('Scanned pages hold no text, so nothing can be copied from them — there is no OCR here.'),
+      ),
+    );
+  },
+};
+
+export default [convert, copyText];

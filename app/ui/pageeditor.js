@@ -228,17 +228,43 @@ export class PageEditor {
     box.addEventListener('pointerdown', (event) => this.onBoxPointerDown(event, annot, box));
     box.addEventListener('pointermove', (event) => this.updateEdgeCursor(event, box));
     box.addEventListener('pointerleave', () => box.classList.remove('is-edge'));
+    // Typing is not committed keystroke by keystroke — that would bury every
+    // other action under hundreds of undo steps. The state at focus is kept so
+    // that one edit session becomes one entry when the caret leaves.
+    let editedFrom = null;
+
+    text.addEventListener('focus', () => {
+      editedFrom = { text: annot.text, marks: annot.marks.map((m) => ({ ...m })) };
+    });
+
     text.addEventListener('input', () => {
       const read = readMarkedText(text);
       annot.text = read.text;
       annot.marks = read.marks;
       this.handlers.onChange({ structural: false });
     });
-    text.addEventListener('blur', () => this.handlers.onChange());
-    // Typing inside a box must not reach the workspace shortcuts.
-    text.addEventListener('keydown', (event) => event.stopPropagation());
+
+    text.addEventListener('blur', () => {
+      const before = editedFrom;
+      editedFrom = null;
+      if (!before || before.text === annot.text) {
+        this.handlers.onChange();
+        return;
+      }
+      // Rewind, then commit forward, so the history entry has a proper "before".
+      const after = { text: annot.text, marks: annot.marks };
+      annot.text = before.text;
+      annot.marks = before.marks;
+      this.handlers.onCommitText?.(annot, after);
+    });
 
     return box;
+  }
+
+  /** True when the caret is inside the selected box's text. */
+  isEditingText() {
+    const active = document.activeElement;
+    return Boolean(active?.classList?.contains('abox__text') && this.overlay.contains(active));
   }
 
   /** Character range currently selected inside the focused text box, if any. */
@@ -318,6 +344,9 @@ export class PageEditor {
 
     event.preventDefault();
     event.stopPropagation();
+    // Grabbing the edge means "I am handling the box, not its text". Dropping
+    // focus makes that unambiguous, and is what lets Delete remove the box.
+    box.querySelector('.abox__text')?.blur();
 
     // Positions are fractions of the whole page, so the drag is measured against
     // the page, not against the (possibly cropped) stage.

@@ -284,6 +284,43 @@ test('clicking and dragging the split marks in the grid', async () => {
   }
 });
 
+test('copy-text mode trades dragging for selecting', async () => {
+  // Chrome switches text selection off inside a draggable element, so these two
+  // cannot both be live. The mode has to actually flip `draggable` — and it has
+  // to flip it on cards rendered *after* the mode was entered, which is the case
+  // that quietly broke when the attribute was set as the string "false".
+  const ws = await loadWorkspace(['report.pdf']);
+  const host = document.createElement('div');
+  host.className = 'grid';
+  host.style.cssText = 'position:fixed;left:0;top:0;width:1000px;height:600px;overflow:hidden;opacity:0;z-index:9999';
+  document.body.appendChild(host);
+
+  const grid = new PageGrid(host, ws, { onOpenPage: () => {}, onCommand: () => {} });
+  grid.setZoom(0.3);
+
+  try {
+    grid.setTextMode(false);
+    grid.render();
+    const draggable = () => [...host.querySelectorAll('.pcard')].filter((c) => c.draggable).length;
+    const total = () => host.querySelectorAll('.pcard').length;
+    assert(total() > 0, 'no cards rendered');
+    assert(draggable() === total(), 'pages should be draggable by default');
+
+    // Entering the mode, then re-rendering, as switching tools does.
+    grid.setTextMode(true);
+    grid.render();
+    assert(host.classList.contains('is-textmode'), 'the grid is not marked as text mode');
+    assert(draggable() === 0, `${draggable()} cards are still draggable in text mode`);
+
+    grid.setTextMode(false);
+    grid.render();
+    assert(draggable() === total(), 'dragging did not come back');
+    assert(!host.classList.contains('is-textmode'), 'text mode was not cleared');
+  } finally {
+    host.remove();
+  }
+});
+
 test('reordering a file moves all of its pages as a block', async () => {
   const ws = await loadWorkspace(['invoice.pdf', 'appendix.pdf']);
   const groups = ws.fileGroups();

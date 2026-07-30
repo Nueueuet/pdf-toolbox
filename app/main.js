@@ -60,6 +60,13 @@ class App {
         for (const listener of this.annotListeners) listener(annot);
       },
       onDeleteAnnot: (annot) => this.deleteAnnot(annot),
+      // One undo step per editing session, not one per keystroke.
+      onCommitText: (annot, after) => {
+        this.ws.commit('Edit text', () => {
+          annot.text = after.text;
+          annot.marks = after.marks;
+        });
+      },
     });
 
     this.buildRail();
@@ -238,10 +245,12 @@ class App {
       const typing = /^(INPUT|TEXTAREA)$/.test(event.target.tagName) || event.target.isContentEditable;
       const meta = event.ctrlKey || event.metaKey;
 
-      if (meta && event.key.toLowerCase() === 'z') {
-        if (typing) return;
+      // While the caret is in a text box, undo belongs to the text: the browser
+      // reverses the typing and our input handler picks the change up.
+      if (meta && !typing && (event.key.toLowerCase() === 'z' || event.key.toLowerCase() === 'y')) {
         event.preventDefault();
-        event.shiftKey ? this.ws.redo() : this.ws.undo();
+        const redo = event.key.toLowerCase() === 'y' || event.shiftKey;
+        redo ? this.ws.redo() : this.ws.undo();
         return;
       }
       if (meta && event.key.toLowerCase() === 'a' && !typing) {
@@ -254,10 +263,23 @@ class App {
         this.exportCurrent();
         return;
       }
-      if (event.key === 'Delete' && !typing && this.ws.selection.size) {
-        event.preventDefault();
-        this.removePages(this.ws.targetPages());
-        return;
+      if ((event.key === 'Delete' || event.key === 'Backspace') && !typing) {
+        // In the page editor these keys remove the selected box — but only when
+        // it was picked up by its edge. With the caret in the text they belong
+        // to the text, and `typing` has already sent us home.
+        const annot = this.mode === 'page' && !this.editor.isEditingText()
+          ? this.editor.selectedAnnot()
+          : null;
+        if (annot) {
+          event.preventDefault();
+          this.deleteAnnot(annot);
+          return;
+        }
+        if (event.key === 'Delete' && this.ws.selection.size) {
+          event.preventDefault();
+          this.removePages(this.ws.targetPages());
+          return;
+        }
       }
       if (event.key === 'Escape' && !typing && this.mode === 'page') {
         this.showGrid();
@@ -376,6 +398,7 @@ class App {
     this.el.panelBlurb.textContent = tool.blurb;
     this.el.panel.hidden = this.ws.pageCount === 0;
     this.grid.setSplitHint(id === 'split');
+    this.grid.setTextMode(id === 'copytext');
 
     // The surface is switched before the panel is built so that a panel can read
     // the editor's state (selected annotation, crop rectangle) as it renders.

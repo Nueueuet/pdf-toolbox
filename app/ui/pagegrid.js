@@ -8,10 +8,12 @@
  *   files  one cover per imported file, so whole files can be reordered
  */
 import { h, clear } from '../util/dom.js';
-import { renderPageCanvas } from '../core/render.js';
+import { renderPageCanvas, viewportFor } from '../core/render.js';
 import { pageSize } from '../core/workspace.js';
+import { makeMapper, totalQuarter } from '../core/geometry.js';
 import { numberPrompt } from './modal.js';
 import { contextMenu } from './menu.js';
+import { TextLayer } from '../../vendor/pdf.mjs';
 
 const THUMB_CONCURRENCY = 3;
 
@@ -38,12 +40,44 @@ export class PageGrid {
       if (event.target === root || event.target.classList.contains('grid__cards')) this.clearSelection();
     });
     ws.on('cuts', () => this.syncCutMarks());
+
+    /*
+     * A thumbnail's width comes from the grid's column sizing, so it is only
+     * known once laid out — and it changes with the window. The text layer is
+     * built once at page scale and re-fitted here whenever that width moves.
+     */
+    this.shellSizes = new ResizeObserver((entries) => {
+      for (const entry of entries) this.fitTextLayer(entry.target, entry.contentRect.width);
+    });
+  }
+
+  /** Scales and shifts a thumbnail's text layer onto its bitmap. */
+  fitTextLayer(shell, width) {
+    const layer = shell.querySelector('.textlayer');
+    if (!layer || !width) return;
+    const winW = Number(shell.dataset.winW);
+    if (!winW) return;
+    const scale = width / winW;
+    const x = Number(shell.dataset.winX) || 0;
+    const y = Number(shell.dataset.winY) || 0;
+    layer.style.transform = `translate(${-x * scale}px, ${-y * scale}px) scale(${scale})`;
   }
 
   setZoom(zoom) {
     this.zoom = Math.min(1.5, Math.max(0.12, zoom));
     this.root.style.setProperty('--thumb-width', `${Math.round(this.zoom * 620)}px`);
     this.render();
+  }
+
+  /**
+   * Text selection and drag-to-reorder cannot both be live: Chrome turns off
+   * selection inside a draggable element, so the two have to take turns.
+   */
+  setTextMode(on) {
+    this.textMode = Boolean(on);
+    this.root.classList.toggle('is-textmode', this.textMode);
+    for (const card of this.root.querySelectorAll('.pcard')) card.draggable = !this.textMode;
+    if (this.textMode) this.clearSelection();
   }
 
   setView(view) {
@@ -102,10 +136,17 @@ export class PageGrid {
   card(page, index) {
     const { w, h: ph } = pageSize(page);
     const shell = h('div.pcard__shell', { style: { aspectRatio: `${w} / ${ph}` } });
+    // Thumbnails are canvases, so their text has to be laid over them too if it
+    // is to be selectable here and not only in the single-page editor.
+    this.shellSizes.observe(shell);
 
     const card = h('div.pcard', {
       dataset: { id: page.id, index: String(index) },
-      draggable: 'true',
+      // Cards rendered while the Copy text tool is open must not be draggable
+      // either, or selection dies on them the moment the grid re-renders.
+      // A real boolean, not a string: `draggable="false"` is a non-empty string
+      // and would set the property to true.
+      draggable: !this.textMode,
       tabindex: '0',
       class: this.ws.selection.has(page.id) ? 'is-selected' : '',
     },
@@ -151,7 +192,7 @@ export class PageGrid {
 
     const card = h('div.filecard', {
       dataset: { src: group.srcId },
-      draggable: 'true',
+      draggable: true,
       tabindex: '0',
       title: group.source?.name ?? '',
     },
@@ -490,7 +531,10 @@ export class PageGrid {
       if (this.thumbCache.size > 400) {
         this.thumbCache.delete(this.thumbCache.keys().next().value);
       }
-      if (shell.isConnected) shell.replaceChildren(cloneCanvas(canvas));
+      if (shell.isConnected) {
+        shell.replaceChildren(cloneCanvas(canvas));
+        await this.addThumbTextLayer(page, shell);
+      }
     } catch (err) {
       if (err?.name === 'RenderingCancelledException') return;
       shell.replaceChildren(h('div.pcard__error', 'Preview failed'));
@@ -498,6 +542,39 @@ export class PageGrid {
     }
   }
 }
+
+/** Adds the selectable-text overlay to one thumbnail. */
+PageGrid.prototype.addThumbTextLayer = async function addThumbTextLayer(page, shell) {
+  const source = this.ws.source(page);
+  // A rasterised page is a picture; a scan never had text to begin with.
+  if (source?.kind !== 'pdf' || page.rasterId) return;
+
+  const pdfPage = await source.doc.getPage(page.srcIndex + 1);
+  const { viewport } = await viewportFor(this.ws, page, 1);
+  const mapper = makeMapper(viewport, page);
+  if (!shell.isConnected) return;
+
+  const layer = h('div.textlayer');
+  layer.style.setProperty('--scale-factor', '1');
+  layer.style.width = `${mapper.displayWidth}px`;
+  layer.style.height = `${mapper.displayHeight}px`;
+
+  const textViewport = pdfPage.getViewport({ scale: 1, rotation: totalQuarter(page) });
+  await new TextLayer({
+    textContentSource: pdfPage.streamTextContent(),
+    container: layer,
+    viewport: textViewport,
+  }).render();
+  if (!shell.isConnected) return;
+
+  Object.assign(shell.dataset, {
+    winW: String(mapper.outWidth),
+    winX: String(mapper.window.x),
+    winY: String(mapper.window.y),
+  });
+  shell.appendChild(layer);
+  this.fitTextLayer(shell, shell.getBoundingClientRect().width);
+};
 
 function cloneCanvas(source) {
   const copy = document.createElement('canvas');

@@ -425,6 +425,7 @@ button { font: inherit; }
 }
 
 .pcard__shell {
+  position: relative;
   display: grid;
   place-items: center;
   width: 100%;
@@ -432,6 +433,32 @@ button { font: inherit; }
   border-radius: 4px;
   overflow: hidden;
 }
+
+/*
+ * Selectable text sits over the thumbnail, same as in the single-page editor —
+ * but inert until the Copy text tool is open. Chrome disables selection inside a
+ * draggable element, so reordering and selecting take turns rather than fight.
+ */
+.pcard__shell .textlayer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  pointer-events: none;
+  user-select: none;
+}
+
+.grid.is-textmode .pcard__shell .textlayer {
+  pointer-events: auto;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.grid.is-textmode .pcard { cursor: text; }
+.grid.is-textmode .pcard__tools { display: none; }
+
+/* A quiet reminder that this view is doing something different right now. */
+.grid.is-textmode .pcard__frame { border-color: #cbd8e4; }
 
 .pcard__canvas {
   display: block;

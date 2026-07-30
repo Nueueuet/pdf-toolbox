@@ -66,6 +66,7 @@ npm run vendor:ai
 | Tool | What it does |
 | --- | --- |
 | Convert | PNG or JPG (one image per page, at 96–600 dpi) or CSV (text laid out as rows and columns). |
+| Copy text | Select text straight off the pages and copy it, or copy everything at once. In the single-page editor text is always selectable; in the grid this tool turns it on, because Chrome switches selection off inside a draggable element — so selecting and reordering take turns. |
 
 **Security**
 
