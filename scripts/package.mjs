@@ -88,21 +88,61 @@ async function mirror(fromDir, zipFile) {
   }
 
   if (existing.length > 0) {
-    const looksLikeOurs = existing.includes('manifest.json') && existing.includes('app');
+    const looksLikeOurs = existing.includes('manifest.json') || existing.includes('vendor');
     if (!looksLikeOurs) {
       console.warn(`  skip mirror: ${target} is not empty and does not look like a previous build`);
       console.warn('         empty it yourself if you really want it overwritten');
       return null;
     }
-    for (const entry of existing) {
-      await rm(path.join(target, entry), { recursive: true, force: true });
-    }
   }
 
+  /*
+   * Copied over the top rather than wiped first.
+   *
+   * A browser with the extension loaded holds its .wasm files open, and on
+   * Windows that makes them undeletable. Deleting first meant one locked file
+   * left the destination stripped of everything else — a broken extension. This
+   * way the destination is always complete, and stale files are pruned
+   * afterwards on a best-effort basis.
+   */
   await copyInto(fromDir, target);
-  // The zip goes along too, for uploading from whichever machine.
   await writeFile(path.join(target, path.basename(zipFile)), await readFile(zipFile));
+  const locked = await prune(fromDir, target, path.basename(zipFile));
+  if (locked.length > 0) {
+    console.warn(`  note: ${locked.length} old file(s) could not be removed (in use by a browser); harmless`);
+  }
   return target;
+}
+
+/** Removes anything in `target` that is no longer in `source`. Never throws. */
+async function prune(source, target, keepFile, base = '') {
+  const stale = [];
+  let entries;
+  try {
+    entries = await readdir(target, { withFileTypes: true });
+  } catch {
+    return stale;
+  }
+
+  for (const entry of entries) {
+    const relative = base ? `${base}/${entry.name}` : entry.name;
+    if (relative === keepFile) continue;
+
+    const origin = path.join(source, relative);
+    const here = path.join(target, relative);
+    const stillWanted = await stat(origin).then(() => true).catch(() => false);
+
+    if (!stillWanted) {
+      try {
+        await rm(here, { recursive: true, force: true });
+      } catch {
+        stale.push(relative);
+      }
+      continue;
+    }
+    if (entry.isDirectory()) stale.push(...(await prune(source, target, keepFile, relative)));
+  }
+  return stale;
 }
 
 async function sizeOf(dir) {

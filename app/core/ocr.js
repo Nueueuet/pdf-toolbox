@@ -35,6 +35,30 @@ export async function ocrInfo() {
   return loadManifest();
 }
 
+/**
+ * Turns the engine's low-level failures into something a user can act on.
+ *
+ * The common one is a stale content security policy: Chrome reads the manifest
+ * when the extension loads but the page's code when the tab opens, so updating
+ * the files without reloading the extension leaves new code running under the
+ * old policy — and WebAssembly is refused with a message that explains nothing
+ * about what to do.
+ */
+function translateEngineError(err) {
+  const message = String(err?.message ?? err);
+  if (/wasm-eval|unsafe-eval|Content Security Policy/i.test(message)) {
+    return new Error(
+      'OCR could not start because the extension is still running under its previous '
+      + 'security policy. Open chrome://extensions (or brave://extensions), press the '
+      + 'reload arrow on PDF Toolbox, then open the workspace again.',
+    );
+  }
+  if (/fetch|404|Failed to load/i.test(message) && /vendor\/ocr/i.test(message)) {
+    return new Error(OCR_NOT_INSTALLED);
+  }
+  return err;
+}
+
 function loadScript(src) {
   return new Promise((resolve, reject) => {
     const script = document.createElement('script');
@@ -91,7 +115,7 @@ export async function loadEngine(onProgress) {
     return { service, manifest };
   })().catch((err) => {
     enginePromise = null; // let a later attempt try again
-    throw err;
+    throw translateEngineError(err);
   });
 
   return enginePromise;

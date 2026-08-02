@@ -37,6 +37,23 @@ for (const file of referenced) {
 }
 if (manifest.manifest_version !== 3) note('manifest_version should be 3');
 
+/*
+ * OCR compiles WebAssembly, which Chrome refuses unless the policy says so. If
+ * the policy is malformed Chrome silently falls back to its default and the
+ * failure surfaces much later as an unexplained WebAssembly error, so check it
+ * here where the cause is obvious.
+ */
+const csp = manifest.content_security_policy?.extension_pages ?? '';
+if (await exists('vendor/ocr/models.json') && !csp.includes("'wasm-unsafe-eval'")) {
+  note("the OCR engine needs 'wasm-unsafe-eval' in content_security_policy.extension_pages");
+}
+for (const directive of csp.split(';').map((d) => d.trim()).filter(Boolean)) {
+  const name = directive.split(/\s+/)[0];
+  if (!['script-src', 'object-src', 'script-src-elem', 'script-src-attr'].includes(name)) {
+    note(`content_security_policy directive "${name}" may be rejected by Chrome, which would drop the whole policy`);
+  }
+}
+
 // --- module graph -----------------------------------------------------------
 async function walk(dir) {
   const out = [];
