@@ -63,17 +63,23 @@ export async function ocrInfo() {
  */
 function translateEngineError(err) {
   const message = String(err?.message ?? err);
+  let friendly = null;
+
   if (/wasm-eval|unsafe-eval|Content Security Policy/i.test(message)) {
-    return new Error(
-      'OCR could not start because the extension is still running under its previous '
-      + 'security policy. Open chrome://extensions (or brave://extensions), press the '
-      + 'reload arrow on PDF Toolbox, then open the workspace again.',
-    );
+    friendly = 'OCR could not start: this page is not allowed to compile WebAssembly. '
+      + 'The extension needs "wasm-unsafe-eval" in its content security policy, and to be '
+      + 'reloaded from chrome://extensions after that changed.';
+  } else if (/fetch|404|Failed to load/i.test(message) && /vendor\/ocr/i.test(message)) {
+    friendly = OCR_NOT_INSTALLED;
   }
-  if (/fetch|404|Failed to load/i.test(message) && /vendor\/ocr/i.test(message)) {
-    return new Error(OCR_NOT_INSTALLED);
-  }
-  return err;
+  if (!friendly) return err;
+
+  // The original is kept, not replaced. Rewriting an error into friendlier words
+  // and dropping what the browser actually said leaves nothing to debug with —
+  // as this very message did.
+  const translated = new Error(`${friendly}\n\nThe browser reported: ${message}`);
+  translated.cause = err;
+  return translated;
 }
 
 function loadScript(src) {
