@@ -31,6 +31,23 @@ export async function ocrAvailable() {
   return Boolean(await loadManifest());
 }
 
+/**
+ * Asks the browser directly whether it will compile WebAssembly here.
+ *
+ * Worth testing rather than assuming: a content security policy problem shows up
+ * deep inside the engine as an error about `wasm-eval`, minutes into a job, and
+ * says nothing about which of the several possible causes applies. Eight bytes
+ * is a complete, empty, valid module — enough to find out in a microsecond.
+ */
+export function wasmAllowed() {
+  try {
+    const empty = new Uint8Array([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]);
+    return { ok: Boolean(new WebAssembly.Module(empty)), error: null };
+  } catch (err) {
+    return { ok: false, error: String(err?.message ?? err) };
+  }
+}
+
 export async function ocrInfo() {
   return loadManifest();
 }
