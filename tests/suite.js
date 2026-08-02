@@ -17,6 +17,9 @@ import { parseRange, formatRange } from '../app/util/ranges.js';
 import { primeFontMetrics } from '../app/core/fonts.js';
 import { PageEditor } from '../app/ui/pageeditor.js';
 import { PageGrid } from '../app/ui/pagegrid.js';
+import { analysePage } from '../app/core/coverage.js';
+import { ocrAvailable, ocrPage } from '../app/core/ocr.js';
+import { PDFDocument, StandardFonts } from '../vendor/pdf-lib.esm.js';
 import * as pdfjsLib from '../vendor/pdf.mjs';
 
 const tests = [];
@@ -573,6 +576,126 @@ test('background replacement recolours the page', async () => {
   const blue = centroid(canvas, (r, g, b) => b > 180 && r < 120);
   assert(blue && blue.count > canvas.width * canvas.height * 0.5, 'background was not replaced');
   page.bg = null;
+});
+
+// ------------------------------------------------------------------------ OCR
+
+/** Rasterises a page so it becomes a picture of text, with no text objects left. */
+async function makeScan(ws, page) {
+  const bytes = await buildPdf(ws, [page], { forceRaster: true, rasterDpi: 150 });
+  await ws.addBytes(bytes, 'scan.pdf');
+  return ws.pages[ws.pageCount - 1];
+}
+
+test('a page that already has text is left alone', async () => {
+  const ws = await loadWorkspace(['report.pdf']);
+  const analysis = await analysePage(ws, ws.pages[0]);
+  assert(analysis.verdict === 'text', `expected "text", got "${analysis.verdict}"`);
+  assert(analysis.textBoxes.length > 10, `only ${analysis.textBoxes.length} text runs found`);
+  assert(analysis.regions.length === 0,
+    `${analysis.regions.length} regions offered for OCR on a page that is already text`);
+});
+
+test('a scanned page is recognised as needing OCR', async () => {
+  const ws = await loadWorkspace(['report.pdf']);
+  const scan = await makeScan(ws, ws.pages[0]);
+  const analysis = await analysePage(ws, scan);
+  assert(analysis.verdict === 'none', `expected "none", got "${analysis.verdict}"`);
+  assert(analysis.textBoxes.length === 0, 'a rasterised page should carry no text');
+  assert(analysis.regions.length > 0, 'nothing was offered for OCR');
+});
+
+test('a half-scanned page is only recognised where it helps', async () => {
+  // The case that separates a useful OCR tool from a wasteful one: real text at
+  // the top, a picture of text at the bottom. Recognising the whole page would
+  // spend the time twice and stack a worse copy under the good text.
+  const ws = new Workspace();
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const page = doc.addPage([595.28, 841.89]);
+  page.drawText('This heading is real selectable text', { x: 56, y: 780, size: 18, font });
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 1000;
+  canvas.height = 400;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#111';
+  ctx.font = 'bold 46px Arial';
+  ctx.fillText('Scanned addendum 2026', 40, 90);
+  ctx.font = '38px Arial';
+  ctx.fillText('Reference SCAN-88231', 40, 180);
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+  const image = await doc.embedPng(new Uint8Array(await blob.arrayBuffer()));
+  page.drawImage(image, { x: 56, y: 300, width: 483, height: 193 });
+
+  await ws.addFiles([new File([await doc.save()], 'mixed.pdf', { type: 'application/pdf' })]);
+  const mixed = ws.pages[0];
+
+  const analysis = await analysePage(ws, mixed);
+  assert(analysis.verdict === 'partial', `expected "partial", got "${analysis.verdict}"`);
+  assert(analysis.textBoxes.length > 0, 'the real text was not seen');
+  assert(analysis.regions.length > 0, 'the scanned block was not offered for OCR');
+
+  // Every region has to sit below the heading — none of them over the real text.
+  const heading = analysis.textBoxes[0];
+  for (const region of analysis.regions) {
+    assert(region.y > heading.y + heading.h,
+      `a region overlaps the existing text (region y ${region.y.toFixed(2)}, text ends ${(heading.y + heading.h).toFixed(2)})`);
+  }
+});
+
+test('recognised text survives being saved, and the page still looks identical', async () => {
+  if (!(await ocrAvailable())) {
+    // The engine is an optional 32 MB download; without it there is nothing to
+    // assert, and failing here would only be noise.
+    return;
+  }
+  const ws = await loadWorkspace(['report.pdf']);
+  const scan = await makeScan(ws, ws.pages[0]);
+
+  const result = await ocrPage(ws, scan, {});
+  assert(!result.skipped, 'the scan was skipped');
+  assert(result.words.length > 0, 'nothing was recognised');
+  scan.ocr = { words: result.words, regions: result.regions, verdict: result.verdict };
+
+  const withOcr = await buildPdf(ws, [scan], { includeOcr: true });
+  const without = await buildPdf(ws, [scan], { includeOcr: false });
+
+  const textOf = async (bytes) => {
+    const doc = await pdfjsLib.getDocument({ data: bytes.slice() }).promise;
+    const content = await (await doc.getPage(1)).getTextContent();
+    const text = content.items.map((i) => i.str).join(' ');
+    await doc.destroy();
+    return text;
+  };
+
+  const text = await textOf(withOcr);
+  assert(text.includes('Quarterly report'), `the heading is not extractable: "${text.slice(0, 80)}"`);
+  assert((await textOf(without)).length === 0, 'text was written even with the layer switched off');
+
+  // The whole point: identical to look at, different to select from.
+  const shot = async (bytes) => {
+    const doc = await pdfjsLib.getDocument({ data: bytes.slice() }).promise;
+    const page = await doc.getPage(1);
+    const viewport = page.getViewport({ scale: 0.4 });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(viewport.width);
+    canvas.height = Math.round(viewport.height);
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    await page.render({ canvasContext: ctx, viewport, intent: 'print' }).promise;
+    const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+    await doc.destroy();
+    return data;
+  };
+  const a = await shot(withOcr);
+  const b = await shot(without);
+  let diff = 0;
+  for (let i = 0; i < a.length; i += 4) diff += Math.abs(a[i] - b[i]);
+  assert(diff === 0, `the invisible layer changed the page's appearance (total difference ${diff})`);
 });
 
 // --------------------------------------------------------------------- runner

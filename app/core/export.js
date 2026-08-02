@@ -12,7 +12,7 @@ import { PDFDocument, StandardFonts, PDFName, degrees, rgb } from '../../vendor/
 import { makeMapper, totalQuarter } from './geometry.js';
 import { renderPageCanvas, viewportFor } from './render.js';
 import { layoutAnnot, anchorOf } from './annots.js';
-import { standardFontFor, primeFontMetrics } from './fonts.js';
+import { standardFontFor, primeFontMetrics, sanitize } from './fonts.js';
 import { hexToUnit } from '../util/format.js';
 
 /** A page can only stay vector if every edit on it is expressible in PDF objects. */
@@ -38,6 +38,7 @@ export async function buildPdf(ws, pages, opts = {}) {
     password = null,
     onProgress = null,
     title = null,
+    includeOcr = true,
   } = opts;
 
   await primeFontMetrics();
@@ -94,6 +95,10 @@ export async function buildPdf(ws, pages, opts = {}) {
       copied.setMediaBox(box.x, box.y, box.width, box.height);
     }
 
+    if (includeOcr && page.ocr?.words?.length) {
+      await drawOcrLayer(copied, page.ocr.words, mapper, await embedFont('Helvetica', false, false));
+    }
+
     for (const annot of page.annots) {
       await drawAnnotOnPage(copied, annot, mapper, embedFont);
     }
@@ -110,6 +115,49 @@ export async function buildPdf(ws, pages, opts = {}) {
   const bytes = await out.save({ useObjectStreams: true });
   onProgress?.(1, 'Done');
   return bytes;
+}
+
+/**
+ * Writes recognised words onto the page at zero opacity.
+ *
+ * This is what makes a scan searchable: the page still shows its original
+ * picture, but a viewer finds real text at the same coordinates, so it can be
+ * selected, copied and searched — in this app and in any other PDF reader, long
+ * after the file has been saved.
+ *
+ * Each word is scaled so its glyphs span the box recognition reported, which
+ * keeps selection rectangles lined up with the ink underneath.
+ */
+async function drawOcrLayer(pdfPage, words, mapper, font) {
+  const rotate = degrees(mapper.drawRotation);
+
+  for (const word of words) {
+    const text = sanitize(word.text);
+    if (!text.trim()) continue;
+
+    // Height first: the box is the glyph height, and font size is close enough
+    // to that for selection to feel right.
+    const boxHeight = word.h * mapper.displayHeight;
+    const boxWidth = word.w * mapper.displayWidth;
+    const size = Math.max(1, boxHeight * 0.82);
+
+    // Then squeeze horizontally so the run ends where the ink ends.
+    const natural = font.widthOfTextAtSize(text, size);
+    const scale = natural > 0 ? Math.min(4, Math.max(0.2, boxWidth / natural)) : 1;
+
+    // Baseline sits a little above the bottom of the box.
+    const at = mapper.pageFractionToUser(word.x, word.y + word.h - boxHeight * 0.2 / mapper.displayHeight);
+
+    pdfPage.drawText(text, {
+      x: at.x,
+      y: at.y,
+      size: size * scale,
+      font,
+      rotate,
+      // Invisible, but present: extraction and selection both still find it.
+      opacity: 0,
+    });
+  }
 }
 
 async function addRasterPage(out, ws, page, { rasterDpi, rasterMime, jpegQuality }) {

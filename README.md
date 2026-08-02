@@ -33,6 +33,12 @@ Optional — enable AI upscaling (adds ~4 MB of model files):
 npm run vendor:ai
 ```
 
+Optional — enable OCR (adds ~32 MB of runtime and model weights):
+
+```bash
+npm run vendor:ocr
+```
+
 ## The tools
 
 **Organise**
@@ -67,6 +73,7 @@ npm run vendor:ai
 | --- | --- |
 | Convert | PNG or JPG (one image per page, at 96–600 dpi) or CSV (text laid out as rows and columns). |
 | Copy text | Select text straight off the pages and copy it, or copy everything at once. In the single-page editor text is always selectable; in the grid this tool turns it on, because Chrome switches selection off inside a draggable element — so selecting and reordering take turns. |
+| OCR | Recognises the text in scanned pages, so it can be selected and copied — in the saved file too. Each page shows a status dot: green for recognised, amber for "this would help", grey for pages that already have real text. Click a dot to do one page, or give a range in the panel. Cancelling keeps whatever finished. A switch colours what OCR added against what the PDF already had. |
 
 **Security**
 
@@ -96,7 +103,10 @@ These are limits worth knowing before you rely on the tool, not bugs:
   vector and the text selectable.
 - **CSV extraction is a heuristic.** A PDF stores glyphs at coordinates, not
   tables; columns are recovered from the spacing. Check the result before relying
-  on it. Scanned pages contain no text at all — there is no OCR here.
+  on it. On a scan, run OCR first — there is no text to extract otherwise.
+- **OCR is a guess, however good a one.** Roughly a second per page, and the
+  result is what a model read, not what the page says. The inspection switch is
+  there so you can check it rather than trust it.
 - **Unlocking needs the password.** Removing a password means saving a copy of a
   file you were already able to open.
 - **Text boxes use the 14 standard PDF fonts** (Helvetica, Times, Courier, with

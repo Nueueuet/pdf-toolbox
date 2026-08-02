@@ -623,6 +623,81 @@ button { font: inherit; }
 .grid.is-cutdragging { cursor: grabbing; }
 .grid.is-cutdragging .cutmark.is-active .cutmark__grip { background: var(--danger); color: #fff; }
 
+/* ------------------------------------------------------------------- OCR */
+
+/*
+ * Status dot on each page while the OCR tool is open: green means recognised,
+ * amber means it would help, grey means the page already has real text.
+ */
+.ocrbadge {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, .95);
+  color: var(--ink-faint);
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  z-index: 2;
+  transition: transform .12s, background .12s, color .12s;
+}
+
+.ocrbadge svg { width: 15px; height: 15px; }
+.ocrbadge:hover { transform: scale(1.1); }
+
+.ocrbadge--done { border-color: #16a34a; color: #16a34a; background: #f0fdf4; }
+.ocrbadge--pending { border-color: #d97706; color: #d97706; background: #fffbeb; }
+.ocrbadge--not-needed { border-color: var(--line); color: #9aa8b6; cursor: default; }
+.ocrbadge--not-needed:hover { transform: none; }
+.ocrbadge--unknown { border-style: dashed; }
+
+.ocrbadge--done:hover { background: #16a34a; color: #fff; }
+.ocrbadge--pending:hover { background: #d97706; color: #fff; }
+
+/* The inspection overlay, drawn over the thumbnail. */
+.pcard__ocrlayer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.ocrsummary { display: flex; flex-direction: column; gap: 6px; }
+
+.ocrsummary__row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.ocrsummary__count { font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; min-width: 22px; }
+
+.ocrdot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  flex: none;
+}
+
+.ocrdot--done { background: #16a34a; border-color: #16a34a; }
+.ocrdot--pending { background: #f59e0b; border-color: #d97706; }
+.ocrdot--not-needed { background: #cbd5e1; border-color: #cbd5e1; }
+.ocrdot--unknown { background: transparent; border-style: dashed; }
+
+.ocrprogress { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.ocrprogress__label { font-size: 12.5px; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+
 /* Sits in the slot after the last page and matches its shape. */
 .addcard {
   display: block;

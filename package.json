@@ -7,6 +7,7 @@
   "scripts": {
     "vendor": "node scripts/fetch-vendor.mjs",
     "vendor:ai": "node scripts/fetch-ai.mjs",
+    "vendor:ocr": "node scripts/fetch-ocr.mjs",
     "icons": "node scripts/make-icons.mjs",
     "test-files": "node scripts/make-test-pdfs.mjs",
     "dev": "node scripts/dev-server.mjs",

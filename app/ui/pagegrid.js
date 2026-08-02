@@ -13,6 +13,7 @@ import { pageSize } from '../core/workspace.js';
 import { makeMapper, totalQuarter } from '../core/geometry.js';
 import { numberPrompt } from './modal.js';
 import { contextMenu } from './menu.js';
+import { ocrStatusOf, OCR_STATUS_LABEL } from '../tools/ocr.js';
 import { TextLayer } from '../../vendor/pdf.mjs';
 
 const THUMB_CONCURRENCY = 3;
@@ -78,6 +79,61 @@ export class PageGrid {
     this.root.classList.toggle('is-textmode', this.textMode);
     for (const card of this.root.querySelectorAll('.pcard')) card.draggable = !this.textMode;
     if (this.textMode) this.clearSelection();
+  }
+
+  /** Shows per-page OCR status and a button to recognise just that page. */
+  setOcrMode(on) {
+    this.ocrMode = Boolean(on);
+    this.root.classList.toggle('is-ocrmode', this.ocrMode);
+    this.render();
+  }
+
+  /** Colours in what was already text against what OCR contributed. */
+  setOcrInspect(on) {
+    this.ocrInspect = Boolean(on);
+    this.root.classList.toggle('is-ocrinspect', this.ocrInspect);
+    for (const shell of this.root.querySelectorAll('.pcard__shell')) {
+      const page = this.ws.pageById(shell.closest('.pcard')?.dataset.id);
+      if (page) this.drawOcrInspection(shell, page);
+    }
+  }
+
+  /**
+   * Paints the two kinds of text over a thumbnail so the result can be checked
+   * at a glance: what the PDF already carried, and what recognition added.
+   */
+  drawOcrInspection(shell, page) {
+    shell.querySelector('.pcard__ocrlayer')?.remove();
+    if (!this.ocrInspect) return;
+
+    const width = shell.clientWidth;
+    const height = shell.clientHeight;
+    if (!width || !height) return;
+
+    const layer = document.createElement('canvas');
+    layer.className = 'pcard__ocrlayer';
+    layer.width = width;
+    layer.height = height;
+    const ctx = layer.getContext('2d');
+
+    const boxes = [
+      ['rgba(22, 163, 74, .18)', 'rgba(22, 163, 74, .7)', page.meta?.ocrTextBoxesList ?? []],
+      ['rgba(245, 158, 11, .22)', 'rgba(217, 119, 6, .85)', page.ocr?.words ?? []],
+    ];
+    for (const [fill, stroke, list] of boxes) {
+      ctx.fillStyle = fill;
+      ctx.strokeStyle = stroke;
+      ctx.lineWidth = 1;
+      for (const box of list) {
+        const x = box.x * width;
+        const y = box.y * height;
+        const w = Math.max(1, box.w * width);
+        const hgt = Math.max(1, box.h * height);
+        ctx.fillRect(x, y, w, hgt);
+        ctx.strokeRect(x + 0.5, y + 0.5, w - 1, hgt - 1);
+      }
+    }
+    shell.appendChild(layer);
   }
 
   setView(view) {
@@ -153,7 +209,10 @@ export class PageGrid {
       tabindex: '0',
       class: this.ws.selection.has(page.id) ? 'is-selected' : '',
     },
-      h('div.pcard__frame', shell, h('span.pcard__badge', String(index + 1))),
+      h('div.pcard__frame', shell,
+        this.ocrMode ? this.ocrBadge(page) : null,
+        h('span.pcard__badge', String(index + 1)),
+      ),
       h('div.pcard__label', page.meta?.note ?? ''),
       h('div.pcard__tools',
         iconBtn('Rotate left', 'M9 14 4 9l5-5 M4 9h7a6 6 0 0 1 6 6v4', () => this.handlers.onCommand('rotate', { pages: [page], delta: -90 })),
@@ -173,6 +232,30 @@ export class PageGrid {
 
     this.queue.push({ page, shell });
     return card;
+  }
+
+  /**
+   * Status dot and per-page trigger, top left. Clicking it recognises this one
+   * page — the range field in the panel is for doing many at once.
+   */
+  ocrBadge(page) {
+    const status = ocrStatusOf(page);
+    const runnable = status === 'pending' || status === 'unknown' || status === 'done';
+    const label = OCR_STATUS_LABEL[status];
+
+    return h(`button.ocrbadge.ocrbadge--${status}`, {
+      type: 'button',
+      title: runnable ? `${label} — click to recognise this page` : label,
+      'aria-label': `${label}. Page ${this.ws.indexOf(page.id) + 1}`,
+      onclick: (event) => {
+        event.stopPropagation();
+        if (!runnable) return;
+        this.handlers.onCommand('ocr-page', { page });
+      },
+    },
+      svgIcon(['M7 3H5a2 2 0 0 0-2 2v2', 'M17 3h2a2 2 0 0 1 2 2v2', 'M7 21H5a2 2 0 0 1-2-2v-2',
+        'M17 21h2a2 2 0 0 0 2-2v-2', 'M7 9h10', 'M7 13h7'], 1.7),
+    );
   }
 
   /** The "add more files" slot that closes out the grid, page-shaped. */
@@ -557,6 +640,7 @@ export class PageGrid {
       }
       if (shell.isConnected) {
         shell.replaceChildren(cloneCanvas(canvas));
+        this.drawOcrInspection(shell, page);
         await this.addThumbTextLayer(page, shell);
       }
     } catch (err) {

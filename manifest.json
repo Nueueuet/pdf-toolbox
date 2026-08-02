@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "PDF Toolbox",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Merge, split, compress, convert, sign and edit PDF files — entirely on your own machine.",
   "minimum_chrome_version": "116",
 
@@ -27,6 +27,6 @@
   "permissions": ["storage", "unlimitedStorage", "downloads"],
 
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'; worker-src 'self'"
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; worker-src 'self'"
   }
 }

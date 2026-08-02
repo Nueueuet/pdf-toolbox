@@ -77,6 +77,11 @@ class App {
 
     this.guardAgainstReload();
     this.ws.on('pages', () => this.onPagesChanged());
+    // Recognition changes only the badges and the overlay, so it repaints the
+    // grid without going through the full page-change path.
+    this.ws.on('ocr', () => {
+      if (this.mode === 'grid') this.grid.render();
+    });
     this.ws.on('history', () => this.syncHistoryButtons());
     this.ws.on('selection', () => this.syncSelectionStatus());
 
@@ -404,6 +409,7 @@ class App {
     this.el.panel.hidden = this.ws.pageCount === 0;
     this.grid.setSplitHint(id === 'split');
     this.grid.setTextMode(id === 'copytext');
+    this.grid.setOcrMode(id === 'ocr');
 
     // The surface is switched before the panel is built so that a panel can read
     // the editor's state (selected annotation, crop rectangle) as it renders.
@@ -565,6 +571,12 @@ class App {
       case 'add-files':
         this.pickFiles();
         break;
+      case 'ocr-page':
+        // The OCR tool owns the engine and the progress display, so the grid's
+        // per-page button is routed back into it rather than duplicating both.
+        if (this.runOcrForPage) this.runOcrForPage(payload.page);
+        else this.selectTool('ocr');
+        break;
       case 'remove-file': {
         const pages = this.ws.pages.filter((p) => p.srcId === payload.srcId);
         const name = this.ws.sources.get(payload.srcId)?.name ?? 'file';
@@ -602,7 +614,31 @@ class App {
   // ----------------------------------------------------------------- export
 
   exportOptions() {
-    return { rasterDpi: 150, rasterMime: 'image/jpeg', jpegQuality: 0.82 };
+    return {
+      rasterDpi: 150,
+      rasterMime: 'image/jpeg',
+      jpegQuality: 0.82,
+      // On by default: someone who ran OCR almost certainly wants the result in
+      // the file they save.
+      includeOcr: this.includeOcr !== false,
+    };
+  }
+
+  /**
+   * Works out what each page needs, in the background, so the grid can show it
+   * before anyone commits to a long recognition run.
+   */
+  async scanPagesForOcr() {
+    if (this.ocrScanRunning) return;
+    this.ocrScanRunning = true;
+    try {
+      const { scanPages } = await import('./tools/ocr.js');
+      await scanPages(this.ws, [...this.ws.pages], () => this.ws.emit('ocr'));
+    } catch (err) {
+      console.error('ocr scan failed', err);
+    } finally {
+      this.ocrScanRunning = false;
+    }
   }
 
   async exportCurrent() {
