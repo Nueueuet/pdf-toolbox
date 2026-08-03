@@ -49,7 +49,17 @@ export class PageGrid {
      * built once at page scale and re-fitted here whenever that width moves.
      */
     this.shellSizes = new ResizeObserver((entries) => {
-      for (const entry of entries) this.fitTextLayer(entry.target, entry.contentRect.width);
+      for (const entry of entries) {
+        this.fitTextLayer(entry.target, entry.contentRect.width);
+        /*
+         * The inspection overlay is sized in pixels, so it can only be drawn
+         * once the thumbnail has a width. Drawing it from here means it lands
+         * whenever that happens — including on the first layout after switching
+         * back from the single-page view, which is otherwise too early.
+         */
+        const page = this.ws.pageById(entry.target.closest('.pcard')?.dataset.id);
+        if (page) this.drawOcrInspection(entry.target, page);
+      }
     });
   }
 
@@ -627,6 +637,11 @@ export class PageGrid {
     const cached = this.thumbCache.get(signature);
     if (cached) {
       shell.replaceChildren(cloneCanvas(cached));
+      // The overlay is not part of the cached bitmap, so it has to be redrawn
+      // here too — skipping it is why the inspection view came back empty after
+      // the thumbnails had been seen once.
+      this.drawOcrInspection(shell, page);
+      await this.addThumbTextLayer(page, shell);
       return;
     }
 
