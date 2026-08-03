@@ -7,6 +7,7 @@ import { saveFile, saveMany } from '../core/download.js';
 import { baseName, formatBytes } from '../util/format.js';
 import { progressToast, toast } from '../ui/toast.js';
 import { pageScope } from './organize.js';
+import { ocrLines } from '../ui/ocrlayer.js';
 
 const convert = {
   id: 'convert',
@@ -157,13 +158,16 @@ const copyText = {
         for (const [index, page] of pages.entries()) {
           progress.update(index / pages.length, `Page ${index + 1} of ${pages.length}`);
           const rows = await extractRows(ctx.ws, page);
-          if (rows.length === 0) continue;
+          // Recognised words count as text too, or copying a scan that OCR has
+          // just read would come back empty.
+          const lines = [...rows.map((cells) => cells.join(' ')), ...ocrLines(page)];
+          if (lines.length === 0) continue;
           if (pages.length > 1) chunks.push(`--- page ${ctx.ws.indexOf(page.id) + 1} ---`);
-          chunks.push(rows.map((cells) => cells.join(' ')).join('\n'));
+          chunks.push(lines.join('\n'));
         }
 
         if (chunks.length === 0) {
-          progress.fail('No text found — these pages are probably scans.');
+          progress.fail('No text found. If these are scans, run OCR first.');
           return;
         }
 

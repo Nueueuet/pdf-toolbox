@@ -31,7 +31,10 @@ const ocr = {
   id: 'ocr',
   label: 'OCR',
   group: 'Convert',
-  mode: 'grid',
+  // Works from the grid or from a single enlarged page, so it leaves the
+  // current view alone — reading a page closely is exactly when you notice its
+  // text cannot be selected.
+  mode: 'any',
   icon: 'M7 3H5a2 2 0 0 0-2 2v2 M17 3h2a2 2 0 0 1 2 2v2 M7 21H5a2 2 0 0 1-2-2v-2 M17 21h2a2 2 0 0 0 2-2v-2 M7 8h10 M7 12h7 M7 16h4',
   blurb: 'Recognise the text in scanned pages so it can be selected and copied — in the saved file too.',
   panel(ctx) {
@@ -194,7 +197,8 @@ const ocr = {
     return h('div',
       section('Pages', summary),
       section('Recognise', scope.el,
-        hint('Click the OCR badge on a page in the grid to do just that one.'),
+        hint('In the grid, the badge on a page recognises just that one. On a single '
+          + 'enlarged page this acts on the page you are looking at, unless you widen the range.'),
         buttonRow(startBtn, cancelBtn),
         progressWrap,
         status,

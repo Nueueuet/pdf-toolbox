@@ -14,6 +14,7 @@ import { makeMapper, totalQuarter } from '../core/geometry.js';
 import { numberPrompt } from './modal.js';
 import { contextMenu } from './menu.js';
 import { ocrStatusOf, OCR_STATUS_LABEL } from '../tools/ocr.js';
+import { appendOcrText } from './ocrlayer.js';
 import { TextLayer } from '../../vendor/pdf.mjs';
 
 const THUMB_CONCURRENCY = 3;
@@ -654,10 +655,12 @@ export class PageGrid {
 /** Adds the selectable-text overlay to one thumbnail. */
 PageGrid.prototype.addThumbTextLayer = async function addThumbTextLayer(page, shell) {
   const source = this.ws.source(page);
-  // A rasterised page is a picture; a scan never had text to begin with.
-  if (source?.kind !== 'pdf' || page.rasterId) return;
+  const hasOcr = Boolean(page.ocr?.words?.length);
+  // A rasterised page holds no text objects, but recognised text still belongs
+  // in the layer — otherwise OCR results would only exist in the saved file.
+  const hasPdfText = source?.kind === 'pdf' && !page.rasterId;
+  if (!hasPdfText && !hasOcr) return;
 
-  const pdfPage = await source.doc.getPage(page.srcIndex + 1);
   const { viewport } = await viewportFor(this.ws, page, 1);
   const mapper = makeMapper(viewport, page);
   if (!shell.isConnected) return;
@@ -667,12 +670,16 @@ PageGrid.prototype.addThumbTextLayer = async function addThumbTextLayer(page, sh
   layer.style.width = `${mapper.displayWidth}px`;
   layer.style.height = `${mapper.displayHeight}px`;
 
-  const textViewport = pdfPage.getViewport({ scale: 1, rotation: totalQuarter(page) });
-  await new TextLayer({
-    textContentSource: pdfPage.streamTextContent(),
-    container: layer,
-    viewport: textViewport,
-  }).render();
+  if (hasPdfText) {
+    const pdfPage = await source.doc.getPage(page.srcIndex + 1);
+    const textViewport = pdfPage.getViewport({ scale: 1, rotation: totalQuarter(page) });
+    await new TextLayer({
+      textContentSource: pdfPage.streamTextContent(),
+      container: layer,
+      viewport: textViewport,
+    }).render();
+  }
+  if (hasOcr) appendOcrText(layer, page, mapper.displayWidth, mapper.displayHeight);
   if (!shell.isConnected) return;
 
   Object.assign(shell.dataset, {

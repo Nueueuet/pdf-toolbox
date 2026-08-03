@@ -12,6 +12,7 @@ import { cssFamilyFor } from '../core/fonts.js';
 import { normalizeMarks } from '../core/annots.js';
 import { normalizeCrop, totalQuarter } from '../core/geometry.js';
 import { clamp } from '../util/format.js';
+import { appendOcrText } from './ocrlayer.js';
 import { TextLayer } from '../../vendor/pdf.mjs';
 
 const HANDLES = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
@@ -136,28 +137,34 @@ export class PageEditor {
   async buildTextLayer(page, token) {
     clear(this.textHost);
     const source = this.ws.source(page);
-    if (source?.kind !== 'pdf' || page.rasterId) return;
-
-    const pdfPage = await source.doc.getPage(page.srcIndex + 1);
-    if (token !== this.renderToken) return;
+    const hasOcr = Boolean(page.ocr?.words?.length);
+    // A rasterised page has no text objects left, but it may well have
+    // recognised text — so the layer is still worth building.
+    const hasPdfText = source?.kind === 'pdf' && !page.rasterId;
+    if (!hasPdfText && !hasOcr) return;
 
     // Built at scale 1 and then scaled with a CSS transform, so resizing the
     // window is a transform change rather than a full re-layout of every word.
-    const viewport = pdfPage.getViewport({ scale: 1, rotation: totalQuarter(page) });
     this.textHost.style.setProperty('--scale-factor', '1');
-    this.textHost.style.width = `${viewport.width}px`;
-    this.textHost.style.height = `${viewport.height}px`;
+    this.textHost.style.width = `${this.pageWidth}px`;
+    this.textHost.style.height = `${this.pageHeight}px`;
 
-    const layer = new TextLayer({
-      textContentSource: pdfPage.streamTextContent(),
-      container: this.textHost,
-      viewport,
-    });
-    await layer.render();
-    if (token !== this.renderToken) {
-      clear(this.textHost);
-      return;
+    if (hasPdfText) {
+      const pdfPage = await source.doc.getPage(page.srcIndex + 1);
+      if (token !== this.renderToken) return;
+      const viewport = pdfPage.getViewport({ scale: 1, rotation: totalQuarter(page) });
+      await new TextLayer({
+        textContentSource: pdfPage.streamTextContent(),
+        container: this.textHost,
+        viewport,
+      }).render();
+      if (token !== this.renderToken) {
+        clear(this.textHost);
+        return;
+      }
     }
+
+    if (hasOcr) appendOcrText(this.textHost, page, this.pageWidth, this.pageHeight);
     this.placeLayers();
   }
 

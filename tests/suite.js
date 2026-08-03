@@ -19,6 +19,7 @@ import { PageEditor } from '../app/ui/pageeditor.js';
 import { PageGrid } from '../app/ui/pagegrid.js';
 import { analysePage } from '../app/core/coverage.js';
 import { ocrAvailable, ocrPage } from '../app/core/ocr.js';
+import { ocrLines } from '../app/ui/ocrlayer.js';
 import { PDFDocument, StandardFonts } from '../vendor/pdf-lib.esm.js';
 import * as pdfjsLib from '../vendor/pdf.mjs';
 
@@ -696,6 +697,54 @@ test('recognised text survives being saved, and the page still looks identical',
   let diff = 0;
   for (let i = 0; i < a.length; i += 4) diff += Math.abs(a[i] - b[i]);
   assert(diff === 0, `the invisible layer changed the page's appearance (total difference ${diff})`);
+});
+
+test('recognised text can be selected in the app, not only in the saved file', async () => {
+  if (!(await ocrAvailable())) return;
+
+  const ws = await loadWorkspace(['report.pdf']);
+  const scan = await makeScan(ws, ws.pages[0]);
+  const result = await ocrPage(ws, scan, {});
+  assert(result.words.length > 0, 'nothing was recognised');
+  scan.ocr = { words: result.words, regions: result.regions, verdict: result.verdict };
+
+  const host = document.createElement('div');
+  host.style.cssText = 'position:fixed;left:0;top:0;width:900px;height:700px;opacity:0;z-index:9999';
+  document.body.appendChild(host);
+  const editor = new PageEditor(host, ws, { onChange: () => {}, onSelectAnnot: () => {} });
+
+  try {
+    await editor.open(scan);
+    for (let i = 0; i < 50 && host.querySelectorAll('.textlayer .ocrword').length === 0; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
+    const spans = host.querySelectorAll('.textlayer .ocrword');
+    assert(spans.length > 0, 'recognised words never reached the text layer');
+
+    // Invisible, but selectable — the page underneath is what should be seen.
+    assert(getComputedStyle(spans[0]).color === 'rgba(0, 0, 0, 0)', 'the words are painted over the page');
+
+    const range = document.createRange();
+    range.selectNodeContents(spans[0]);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    const copied = selection.toString();
+    selection.removeAllRanges();
+    assert(copied.trim().length > 0, 'selecting a recognised word produced nothing');
+
+    // And each word has to sit on the page rather than beside it.
+    const stage = host.querySelector('.editor__stage').getBoundingClientRect();
+    const box = spans[0].getBoundingClientRect();
+    assert(box.left >= stage.left - 2 && box.right <= stage.right + 2,
+      'a recognised word is positioned outside the page');
+
+    assert(ocrLines(scan).length > 0, 'ocrLines produced nothing to copy');
+  } finally {
+    editor.destroy();
+    host.remove();
+  }
 });
 
 // --------------------------------------------------------------------- runner

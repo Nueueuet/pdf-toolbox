@@ -805,6 +805,17 @@ button { font: inherit; }
 
 .textlayer ::selection { background: rgba(13, 139, 242, .3); }
 
+/*
+ * Recognised words, placed by us rather than by pdf.js. Anchored top-left and
+ * stretched horizontally to the box OCR reported, so a selection lands on the
+ * ink instead of beside it.
+ */
+.textlayer .ocrword {
+  transform-origin: 0 0;
+  white-space: pre;
+  line-height: 1;
+}
+
 /* pdf.js marks the end of the text with this; it must not be selectable. */
 .textlayer .endOfContent {
   position: absolute;

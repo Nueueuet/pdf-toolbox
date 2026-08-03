@@ -73,7 +73,7 @@ npm run vendor:ocr
 | --- | --- |
 | Convert | PNG or JPG (one image per page, at 96–600 dpi) or CSV (text laid out as rows and columns). |
 | Copy text | Select text straight off the pages and copy it, or copy everything at once. In the single-page editor text is always selectable; in the grid this tool turns it on, because Chrome switches selection off inside a draggable element — so selecting and reordering take turns. |
-| OCR | Recognises the text in scanned pages, so it can be selected and copied — in the saved file too. Each page shows a status dot: green for recognised, amber for "this would help", grey for pages that already have real text. Click a dot to do one page, or give a range in the panel. Cancelling keeps whatever finished. A switch colours what OCR added against what the PDF already had. |
+| OCR | Recognises the text in scanned pages. The words become selectable straight away — on the enlarged page, in the grid with **Copy text**, and in the saved file. Each page shows a status dot: green for recognised, amber for "this would help", grey for pages that already have real text. Click a dot to do one page, give a range in the panel, or open a page and recognise just that one. Cancelling keeps whatever finished. A switch colours what OCR added against what the PDF already had. |
 
 **Security**
 

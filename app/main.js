@@ -80,7 +80,11 @@ class App {
     // Recognition changes only the badges and the overlay, so it repaints the
     // grid without going through the full page-change path.
     this.ws.on('ocr', () => {
+      // Recognised words join the page's selectable text, so both surfaces have
+      // to rebuild — otherwise OCR finishes and the page still cannot be
+      // selected from until something else happens to redraw it.
       if (this.mode === 'grid') this.grid.render();
+      else this.editor.refresh();
     });
     this.ws.on('history', () => this.syncHistoryButtons());
     this.ws.on('selection', () => this.syncSelectionStatus());
