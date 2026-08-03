@@ -153,8 +153,12 @@ npm run dev      # serves the app at http://localhost:5175
 npm run check    # verifies the manifest and every import resolves
 ```
 
-The dev server behaves just like the extension and is much faster to iterate on
-than reloading it.
+The dev server sends the extension's own content security policy, so code that
+only breaks once installed breaks here too. `--no-csp` turns that off.
+
+That matters more than it sounds: OCR's image library evaluates strings as
+JavaScript, which Manifest V3 forbids on an extension page and no setting can
+permit. It runs in a sandboxed page for that reason — see `sandbox/`.
 
 ### Tests
 
@@ -177,6 +181,7 @@ the wrong place on `/Rotate 90` pages — while looking perfectly fine at 0° an
 ```
 manifest.json          MV3 manifest; no popup, the icon opens app/index.html
 background/            service worker: opens (or focuses) the workspace tab
+sandbox/               the OCR engine, isolated because it needs eval
 app/
   core/
     workspace.js       the document model every tool reads and writes

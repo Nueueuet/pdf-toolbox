@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>OCR engine</title>
+</head>
+<body>
+  <!--
+    Nothing is shown here. This page exists only to give the OCR engine a place
+    to run.
+
+    OpenCV's Emscripten build evaluates strings as JavaScript, which an ordinary
+    extension page may never do: Manifest V3 forbids 'unsafe-eval' outright, and
+    no manifest setting can grant it. A sandboxed page is the documented way out
+    — it gets its own, looser policy in exchange for losing access to every
+    chrome.* API and to the extension's origin.
+
+    That trade is fine here. The engine needs no APIs; it needs pixels in and
+    words out, which travel over postMessage.
+  -->
+  <script type="module" src="ocr-sandbox.js"></script>
+</body>
+</html>

@@ -7,7 +7,7 @@
  */
 import { h, clear } from '../util/dom.js';
 import { section, field, hint, button, primary, buttonRow, checkbox } from '../ui/controls.js';
-import { ocrAvailable, ocrInfo, loadEngine, ocrPage, wasmAllowed, OCR_NOT_INSTALLED } from '../core/ocr.js';
+import { ocrAvailable, ocrInfo, loadEngine, ocrPage, OCR_NOT_INSTALLED } from '../core/ocr.js';
 import { analysePage } from '../core/coverage.js';
 import { pageScope } from './organize.js';
 import { toast } from '../ui/toast.js';
@@ -90,20 +90,6 @@ const ocr = {
       startBtn.disabled = !installed;
       if (!installed) {
         status.textContent = OCR_NOT_INSTALLED;
-        return;
-      }
-
-      // Checked up front rather than three minutes into a job: OCR needs to
-      // compile WebAssembly, and if the browser will not allow that here, the
-      // failure is worth reporting before anyone waits on it.
-      const wasm = wasmAllowed();
-      if (!wasm.ok) {
-        startBtn.disabled = true;
-        installed = false;
-        status.textContent = 'This browser is refusing to compile WebAssembly on this page, '
-          + 'so OCR cannot run. The extension needs "wasm-unsafe-eval" in its content security '
-          + `policy, and to be reloaded after that changed. Reported: ${wasm.error}`;
-        status.classList.add('hint--warn');
         return;
       }
 

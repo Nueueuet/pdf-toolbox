@@ -30,33 +30,6 @@
   <ol id="list"></ol>
   <div id="summary">Running…</div>
 
-  <script type="module">
-    import { run } from './suite.js';
-
-    const list = document.getElementById('list');
-    const summary = document.getElementById('summary');
-
-    const results = await run((result) => {
-      const li = document.createElement('li');
-      li.className = result.ok ? 'ok' : 'fail';
-      li.innerHTML = `<span class="mark">${result.ok ? '✓' : '✕'}</span>`
-        + `<span class="name"></span><span class="ms">${result.ms} ms</span>`;
-      li.querySelector('.name').textContent = result.name;
-      if (!result.ok) {
-        const err = document.createElement('span');
-        err.className = 'err';
-        err.textContent = result.error;
-        li.querySelector('.name').appendChild(err);
-      }
-      list.appendChild(li);
-    });
-
-    const failed = results.filter((r) => !r.ok);
-    summary.textContent = failed.length
-      ? `${failed.length} of ${results.length} tests failed`
-      : `All ${results.length} tests passed`;
-    summary.style.color = failed.length ? '#dc2626' : '#16a34a';
-    window.__results = results;
-  </script>
+  <script type="module" src="run.js"></script>
 </body>
 </html>

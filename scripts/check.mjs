@@ -82,7 +82,22 @@ async function walkAll(dir) {
   return out;
 }
 
-const sources = [...(await walk('app')), ...(await walk('background')), ...(await walk('tests'))];
+const sources = [
+  ...(await walk('app')),
+  ...(await walk('background')),
+  ...(await walk('sandbox')),
+  ...(await walk('tests')),
+];
+
+// The sandbox is where the OCR engine runs, so it has to be declared and served.
+if (await exists('sandbox/ocr-sandbox.html')) {
+  if (!manifest.sandbox?.pages?.includes('sandbox/ocr-sandbox.html')) {
+    note('sandbox/ocr-sandbox.html exists but is not listed under "sandbox.pages"');
+  }
+  if (!manifest.content_security_policy?.sandbox?.includes("'unsafe-eval'")) {
+    note("the sandbox policy needs 'unsafe-eval' — the OCR engine cannot start without it");
+  }
+}
 const IMPORT = /(?:^|\n)\s*(?:import|export)[\s\S]*?from\s+['"]([^'"]+)['"]/g;
 
 for (const file of sources) {
@@ -103,7 +118,7 @@ for (const file of sources) {
 }
 
 // --- html assets ------------------------------------------------------------
-for (const page of ['app/index.html', 'tests/index.html']) {
+for (const page of ['app/index.html', 'tests/index.html', 'sandbox/ocr-sandbox.html']) {
   const html = await readFile(path.join(root, page), 'utf8');
   for (const match of html.matchAll(/(?:src|href)="([^"]+)"/g)) {
     const ref = match[1];

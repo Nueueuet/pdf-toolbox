@@ -17,7 +17,7 @@ const stageDir = path.join(root, '.package-tmp');
 const outDir = path.join(root, 'dist');
 
 /** Everything the extension needs at runtime, and nothing more. */
-const INCLUDE = ['manifest.json', 'app', 'background', 'icons', 'vendor', 'LICENSE', 'THIRD-PARTY.md', 'PRIVACY.md'];
+const INCLUDE = ['manifest.json', 'app', 'background', 'sandbox', 'icons', 'vendor', 'LICENSE', 'THIRD-PARTY.md', 'PRIVACY.md'];
 
 /** Dropped even inside the included trees. */
 const EXCLUDE = new Set(['.DS_Store', 'Thumbs.db']);

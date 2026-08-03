@@ -15,6 +15,25 @@ import path from 'node:path';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const port = Number(process.argv[2] ?? 5175);
 
+/**
+ * The extension's own content security policy is applied by default.
+ *
+ * A permissive dev server hides exactly the bugs that only appear once
+ * installed — code that evaluates strings, an inline script, a library that
+ * needs a sandbox. All of those cost an afternoon each when they surface in
+ * somebody else's browser instead of here. `--no-csp` opts out.
+ */
+const enforceCsp = !process.argv.includes('--no-csp');
+const POLICIES = JSON.parse(
+  await readFile(path.join(root, 'manifest.json'), 'utf8'),
+).content_security_policy ?? {};
+const EXTENSION_CSP = POLICIES.extension_pages ?? '';
+/*
+ * The sandbox has its own, looser policy in the real extension — dropping the
+ * `sandbox` token, which only makes sense in a manifest, not in a header.
+ */
+const SANDBOX_CSP = (POLICIES.sandbox ?? '').replace(/^\s*sandbox[^;]*;\s*/, '');
+
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -67,14 +86,21 @@ createServer(async (req, res) => {
     }
 
     const body = await readFile(filePath);
-    res.writeHead(200, {
+    const headers = {
       'Content-Type': TYPES[path.extname(filePath).toLowerCase()] ?? 'application/octet-stream',
       'Cache-Control': 'no-store',
-    });
+    };
+    if (enforceCsp) {
+      const inSandbox = url.pathname.startsWith('/sandbox/');
+      const policy = inSandbox ? SANDBOX_CSP : EXTENSION_CSP;
+      if (policy) headers['Content-Security-Policy'] = policy;
+    }
+    res.writeHead(200, headers);
     res.end(body);
   } catch (err) {
     res.writeHead(500).end(String(err?.message ?? err));
   }
 }).listen(port, () => {
   console.log(`PDF Toolbox dev server: http://localhost:${port}/`);
+  if (enforceCsp) console.log(`  enforcing the extension policy: ${EXTENSION_CSP}`);
 });
