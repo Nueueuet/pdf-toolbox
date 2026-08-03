@@ -155,6 +155,30 @@ filename. Nothing is downloaded from the internet.
 That is the complete list. The extension requests **no host permissions at all**,
 which is worth pointing out in the listing: it cannot see any website you visit.
 
+### The sandbox, if a reviewer asks
+
+Since the OCR release the manifest declares a sandboxed page whose policy
+includes `'unsafe-eval'`. That draws attention, so here is the honest account of
+it — paste this into any reply:
+
+```
+The extension includes an optional offline OCR engine (PaddleOCR, running via
+ONNX Runtime and OpenCV, both bundled). OpenCV's WebAssembly build evaluates
+strings as JavaScript, which an extension page may not do. Rather than weaken
+the extension's own policy — which Manifest V3 does not allow in any case — the
+engine runs in a sandboxed page, as documented for exactly this situation.
+
+The sandboxed page has no access to chrome.* APIs, no host permissions, and no
+access to the extension's origin. It communicates only by postMessage: the
+workspace sends image pixels, the sandbox returns recognised words and their
+positions. It never touches the network; the model weights are bundled in the
+package and handed to it by the parent page.
+```
+
+Nothing else in the extension runs in the sandbox, and everything continues to
+work with the OCR files absent — the tool simply reports that the engine is not
+installed.
+
 ### Screenshots
 
 You need at least one, at 1280×800 or 640×400. Good ones to take:
