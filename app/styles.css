@@ -817,18 +817,21 @@ button { font: inherit; }
   z-index: 4;
 }
 
+.editor__nav svg { display: block; }
 .editor__nav--prev { left: 14px; }
 .editor__nav--next { right: 14px; }
+
+/*
+ * Gone entirely at the ends of the document, rather than dimmed: there is
+ * nowhere to go, so offering the control at all is a small lie. `display` also
+ * cannot be undone by the hover rule below, which outranks any opacity set
+ * here — which is why these stayed visible when they were merely transparent.
+ */
+.editor__nav:disabled { display: none; }
 
 .editor:hover .editor__nav { opacity: .85; }
 .editor__nav:hover { opacity: 1; background: var(--blue); border-color: var(--blue); color: #fff; }
 .editor__nav:focus-visible { opacity: 1; outline: 2px solid var(--blue); outline-offset: 2px; }
-
-.editor__nav:disabled {
-  opacity: 0;
-  cursor: default;
-  pointer-events: none;
-}
 
 .editor__stage {
   position: relative;

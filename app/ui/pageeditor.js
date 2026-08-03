@@ -7,6 +7,7 @@
  * grid thumbnails render the same page through the real pipeline).
  */
 import { h, clear, icon } from '../util/dom.js';
+
 import { renderPageCanvas } from '../core/render.js';
 import { cssFamilyFor } from '../core/fonts.js';
 import { normalizeMarks } from '../core/annots.js';
@@ -45,8 +46,8 @@ export class PageEditor {
     this.stage.append(this.canvasHost, this.textHost, this.inspectHost, this.overlay);
     // Paging arrows at the edges of the view, where the mouse already is when
     // you are reading a page — the pair in the toolbar is a long way from there.
-    this.prevNav = this.navButton('prev', '‹', -1);
-    this.nextNav = this.navButton('next', '›', 1);
+    this.prevNav = this.navButton('prev', 'M15 18 9 12l6-6', -1);
+    this.nextNav = this.navButton('next', 'M9 18l6-6-6-6', 1);
 
     /*
      * The arrows are siblings of the viewport, not children of it. Inside a
@@ -65,13 +66,18 @@ export class PageEditor {
     window.addEventListener('resize', this.onResize);
   }
 
-  navButton(side, glyph, delta) {
+  /**
+   * The chevron is drawn, not typed. A text glyph like › is centred by its line
+   * box rather than by its own shape, so it sits visibly off-centre — and by a
+   * different amount depending on the font the machine happens to use.
+   */
+  navButton(side, path, delta) {
     return h(`button.editor__nav.editor__nav--${side}`, {
       type: 'button',
       title: side === 'prev' ? 'Previous page (left arrow)' : 'Next page (right arrow)',
       'aria-label': side === 'prev' ? 'Previous page' : 'Next page',
       onclick: () => this.handlers.onStepPage?.(delta),
-    }, glyph);
+    }, icon(path, { size: 22, stroke: 2 }));
   }
 
   /** Greys out the arrow that would run off the end of the document. */
