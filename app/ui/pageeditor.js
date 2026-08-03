@@ -38,8 +38,11 @@ export class PageEditor {
     // Transparent, selectable copies of the page's words, sitting between the
     // bitmap and the annotations — the same trick Chrome's own PDF viewer uses.
     this.textHost = h('div.textlayer');
+    // Sits above the page and below the annotations: it is a check on the OCR
+    // result, so it has to be visible over the ink it claims to describe.
+    this.inspectHost = h('div.inspectlayer');
     this.overlay = h('div.editor__overlay');
-    this.stage.append(this.canvasHost, this.textHost, this.overlay);
+    this.stage.append(this.canvasHost, this.textHost, this.inspectHost, this.overlay);
     this.viewport = h('div.editor__viewport', this.stage);
     clear(root).appendChild(this.viewport);
 
@@ -125,7 +128,38 @@ export class PageEditor {
 
     this.fit();
     this.drawOverlay();
+    this.drawInspection();
     this.buildTextLayer(pageForRender, token).catch((err) => console.error('text layer failed', err));
+  }
+
+  /** Colours what OCR added against what the PDF already carried. */
+  setInspect(on) {
+    this.inspect = Boolean(on);
+    this.drawInspection();
+  }
+
+  drawInspection() {
+    clear(this.inspectHost);
+    if (!this.inspect || !this.page) return;
+
+    const groups = [
+      ['existing', this.page.meta?.ocrTextBoxesList ?? []],
+      ['ocr', (this.page.ocr?.words ?? []).map((w) => ({ x: w.x, y: w.y, w: w.w, h: w.h, text: w.text }))],
+    ];
+
+    for (const [kind, boxes] of groups) {
+      for (const box of boxes) {
+        this.inspectHost.appendChild(h(`div.inspectbox.inspectbox--${kind}`, {
+          style: {
+            left: `${box.x * 100}%`,
+            top: `${box.y * 100}%`,
+            width: `${box.w * 100}%`,
+            height: `${box.h * 100}%`,
+          },
+          title: box.text ? `Recognised: ${box.text}` : 'Text the PDF already had',
+        }));
+      }
+    }
   }
 
   /**
@@ -192,7 +226,7 @@ export class PageEditor {
     const s = this.scale;
     const win = this.window ?? { x: 0, y: 0 };
     const transform = `translate(${-win.x * s}px, ${-win.y * s}px) scale(${s})`;
-    for (const layer of [this.textHost, this.overlay]) {
+    for (const layer of [this.textHost, this.inspectHost, this.overlay]) {
       layer.style.width = `${this.pageWidth}px`;
       layer.style.height = `${this.pageHeight}px`;
       layer.style.transform = transform;

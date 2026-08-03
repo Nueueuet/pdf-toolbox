@@ -670,6 +670,31 @@ button { font: inherit; }
   pointer-events: none;
 }
 
+/* The same check on an enlarged page, where the boxes are worth reading. */
+.inspectlayer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.inspectbox {
+  position: absolute;
+  border-radius: 1px;
+}
+
+.inspectbox--existing {
+  background: rgba(22, 163, 74, .16);
+  outline: 1px solid rgba(22, 163, 74, .65);
+}
+
+.inspectbox--ocr {
+  background: rgba(245, 158, 11, .2);
+  outline: 1px solid rgba(217, 119, 6, .8);
+}
+
 .ocrsummary { display: flex; flex-direction: column; gap: 6px; }
 
 .ocrsummary__row {

@@ -628,6 +628,13 @@ class App {
     };
   }
 
+  /** The OCR inspection view, on whichever surface is showing. */
+  setOcrInspect(on) {
+    this.ocrInspect = Boolean(on);
+    this.grid.setOcrInspect(this.ocrInspect);
+    this.editor.setInspect(this.ocrInspect);
+  }
+
   /**
    * Works out what each page needs, in the background, so the grid can show it
    * before anyone commits to a long recognition run.

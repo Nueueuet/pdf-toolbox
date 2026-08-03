@@ -53,8 +53,8 @@ const ocr = {
     });
     const inspect = checkbox({
       label: 'Show what OCR added',
-      checked: ctx.app.grid.ocrInspect === true,
-      onchange: (on) => ctx.app.grid.setOcrInspect(on),
+      checked: ctx.app.ocrInspect === true,
+      onchange: (on) => ctx.app.setOcrInspect(on),
     });
 
     const startBtn = primary('Recognise text', { onclick: () => run() });
