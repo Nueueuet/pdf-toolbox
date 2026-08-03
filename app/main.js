@@ -61,6 +61,7 @@ class App {
         for (const listener of this.annotListeners) listener(annot);
       },
       onDeleteAnnot: (annot) => this.deleteAnnot(annot),
+      onStepPage: (delta) => this.stepPage(delta),
       // One undo step per editing session, not one per keystroke.
       onCommitText: (annot, after) => {
         this.ws.commit('Edit text', () => {
@@ -293,6 +294,19 @@ class App {
       }
       if (event.key === 'Escape' && !typing && this.mode === 'page') {
         this.showGrid();
+        return;
+      }
+
+      // Paging through a document with the arrow keys, as long as the caret is
+      // not in a text box, where they belong to the text.
+      if (this.mode === 'page' && !typing && !meta) {
+        if (event.key === 'ArrowLeft' || event.key === 'PageUp') {
+          event.preventDefault();
+          this.stepPage(-1);
+        } else if (event.key === 'ArrowRight' || event.key === 'PageDown') {
+          event.preventDefault();
+          this.stepPage(1);
+        }
       }
     });
   }
@@ -500,27 +514,38 @@ class App {
     if (!page) return;
     this.editor.setMode(editorMode);
     this.editor.open(page);
-    this.el.editorLabel.textContent = `Page ${this.ws.indexOf(page.id) + 1} of ${this.ws.pageCount}`;
+
+    const index = this.ws.indexOf(page.id);
+    this.el.editorLabel.textContent = `Page ${index + 1} of ${this.ws.pageCount}`;
+    $('#prevPage').disabled = index <= 0;
+    $('#nextPage').disabled = index >= this.ws.pageCount - 1;
   }
 
-  /** Called when a page is opened from the grid. */
+  /** Called when a page is opened from the grid, or stepped to with the arrows. */
   openPage(page) {
     if (!page) return;
     const tool = TOOLS.find((t) => t.id === this.activeToolId);
-    // An organise tool has no per-page controls, so opening a page from the grid
-    // switches to Write rather than leaving a panel that cannot act on it.
-    if (tool?.mode !== 'page') {
+
+    /*
+     * A tool that works on either surface stays put. Only a grid-only tool has
+     * to hand over, because its panel cannot act on a single page — and it
+     * hands over to Write. Getting this wrong meant paging through a document
+     * with the arrows threw you out of OCR and into Write on the first press.
+     */
+    if (tool?.mode !== 'page' && tool?.mode !== 'any') {
       this.selectTool('write', page);
       return;
     }
     this.currentPageId = page.id;
-    this.showEditor(tool.editorMode ?? 'select');
+    this.showEditor(tool.mode === 'page' ? (tool.editorMode ?? 'select') : 'select');
   }
 
+  /** Moves to the next or previous page, staying in the current tool. */
   stepPage(delta) {
     const index = this.ws.indexOf(this.currentPageId);
     const next = this.ws.pages[index + delta];
-    if (next) this.openPage(next);
+    if (!next) return;
+    this.openPage(next);
   }
 
   // --------------------------------------------------------------- commands

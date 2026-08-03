@@ -776,17 +776,58 @@ button { font: inherit; }
 /* ------------------------------------------------------------------ editor */
 
 .editor {
+  position: relative;
   flex: 1;
   min-height: 0;
   display: flex;
 }
 
 .editor__viewport {
+  position: relative;
   flex: 1;
   display: grid;
   place-items: center;
   overflow: auto;
-  padding: 24px;
+  /* The wide sides are the paging arrows' lane; fit() reads this padding. */
+  padding: 24px 74px;
+}
+
+/*
+ * Paging arrows pinned to the sides of the view. Quiet until the pointer is in
+ * the area, so they do not compete with the page itself for attention.
+ */
+.editor__nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 62px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .92);
+  color: var(--ink-soft);
+  font-size: 26px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: var(--shadow-md);
+  opacity: 0;
+  transition: opacity .14s, background .12s, color .12s;
+  z-index: 4;
+}
+
+.editor__nav--prev { left: 14px; }
+.editor__nav--next { right: 14px; }
+
+.editor:hover .editor__nav { opacity: .85; }
+.editor__nav:hover { opacity: 1; background: var(--blue); border-color: var(--blue); color: #fff; }
+.editor__nav:focus-visible { opacity: 1; outline: 2px solid var(--blue); outline-offset: 2px; }
+
+.editor__nav:disabled {
+  opacity: 0;
+  cursor: default;
+  pointer-events: none;
 }
 
 .editor__stage {

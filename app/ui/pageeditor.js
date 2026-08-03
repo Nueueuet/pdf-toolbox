@@ -43,8 +43,18 @@ export class PageEditor {
     this.inspectHost = h('div.inspectlayer');
     this.overlay = h('div.editor__overlay');
     this.stage.append(this.canvasHost, this.textHost, this.inspectHost, this.overlay);
+    // Paging arrows at the edges of the view, where the mouse already is when
+    // you are reading a page — the pair in the toolbar is a long way from there.
+    this.prevNav = this.navButton('prev', '‹', -1);
+    this.nextNav = this.navButton('next', '›', 1);
+
+    /*
+     * The arrows are siblings of the viewport, not children of it. Inside a
+     * scrollable box, `top: 50%` measures against the scrollable content rather
+     * than the part you can see, so on a tall page they would sit off-screen.
+     */
     this.viewport = h('div.editor__viewport', this.stage);
-    clear(root).appendChild(this.viewport);
+    clear(root).append(this.viewport, this.prevNav, this.nextNav);
 
     // The overlay lets clicks through so text underneath stays selectable, so
     // "click the page to deselect" has to be caught on the stage instead.
@@ -53,6 +63,23 @@ export class PageEditor {
     });
     this.onResize = () => this.fit();
     window.addEventListener('resize', this.onResize);
+  }
+
+  navButton(side, glyph, delta) {
+    return h(`button.editor__nav.editor__nav--${side}`, {
+      type: 'button',
+      title: side === 'prev' ? 'Previous page (left arrow)' : 'Next page (right arrow)',
+      'aria-label': side === 'prev' ? 'Previous page' : 'Next page',
+      onclick: () => this.handlers.onStepPage?.(delta),
+    }, glyph);
+  }
+
+  /** Greys out the arrow that would run off the end of the document. */
+  syncNav() {
+    const index = this.page ? this.ws.indexOf(this.page.id) : -1;
+    const single = this.ws.pageCount <= 1;
+    this.prevNav.disabled = single || index <= 0;
+    this.nextNav.disabled = single || index < 0 || index >= this.ws.pageCount - 1;
   }
 
   destroy() {
@@ -127,6 +154,7 @@ export class PageEditor {
     clear(this.canvasHost).appendChild(canvas);
 
     this.fit();
+    this.syncNav();
     this.drawOverlay();
     this.drawInspection();
     this.buildTextLayer(pageForRender, token).catch((err) => console.error('text layer failed', err));
@@ -205,11 +233,19 @@ export class PageEditor {
   /** Sizes the stage so the visible part of the page fits the available area. */
   fit() {
     if (!this.viewWidth) return;
-    const box = this.viewport.getBoundingClientRect();
-    const padding = 48;
+
+    /*
+     * Measured against the viewport's content box, so the CSS padding is the
+     * only place the margin around the page is decided — including the wider
+     * left and right margins that keep the paging arrows off the page. Repeating
+     * that number here as well is how they ended up overlapping.
+     */
+    const style = getComputedStyle(this.viewport);
+    const padX = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
+    const padY = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
     const scale = Math.min(
-      (box.width - padding) / this.viewWidth,
-      (box.height - padding) / this.viewHeight,
+      (this.viewport.clientWidth - padX) / this.viewWidth,
+      (this.viewport.clientHeight - padY) / this.viewHeight,
     );
     this.scale = Math.max(0.05, scale || 0.5);
     this.stage.style.width = `${this.viewWidth * this.scale}px`;
