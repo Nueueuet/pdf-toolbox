@@ -179,6 +179,8 @@ button { font: inherit; }
   font-weight: 650;
 }
 
+.rail__item:disabled { pointer-events: none; }
+
 /* --------------------------------------------------------------- workspace */
 
 .workspace {
@@ -188,6 +190,7 @@ button { font: inherit; }
   overflow: hidden;
 }
 
+/* Centred inside the workspace column, not a page of its own. */
 .landing {
   display: flex;
   flex-direction: column;
@@ -201,10 +204,14 @@ button { font: inherit; }
 
 .landing__title {
   margin: 0;
-  font-size: 40px;
+  font-size: 34px;
   font-weight: 800;
-  letter-spacing: -1px;
+  letter-spacing: -.8px;
 }
+
+/* The rail is present before there is a document, but has nothing to act on. */
+.rail.is-idle { opacity: .5; }
+.rail.is-idle .rail__item { cursor: default; }
 
 .landing__sub {
   margin: 0 0 18px;
@@ -772,6 +779,88 @@ button { font: inherit; }
 
 .pcard.is-dropbefore .pcard__frame { box-shadow: -3px 0 0 var(--blue), var(--shadow-md); }
 .pcard.is-dropafter .pcard__frame { box-shadow: 3px 0 0 var(--blue), var(--shadow-md); }
+
+/* ------------------------------------------------------------------ viewer */
+
+.viewer {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  background: #eef2f6;
+}
+
+/*
+ * The scroller is the whole panning mechanism. Once a page is larger than this
+ * box, the wheel, shift-wheel, a tilt wheel, the scrollbars and the keyboard all
+ * pan it without any code of ours.
+ */
+.viewer__scroll {
+  flex: 1;
+  overflow: auto;
+  padding: 24px;
+  scrollbar-gutter: stable;
+}
+
+.viewer__pages {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 100%;
+  /* Centred while it fits, top-aligned once it is taller than the window. */
+  justify-content: safe center;
+}
+
+.viewer__page {
+  position: relative;
+  flex: none;
+  background: #fff;
+  box-shadow: var(--shadow-lg);
+}
+
+.viewer__canvas, .viewer__bitmap {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.viewer__page .textlayer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  user-select: text;
+}
+
+.viewer__number {
+  position: absolute;
+  left: 50%;
+  bottom: -22px;
+  transform: translateX(-50%);
+  font-size: 11.5px;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.viewer.is-panning .viewer__scroll { cursor: grabbing; }
+.viewer.is-panning .textlayer { pointer-events: none; }
+
+.viewerbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  background: var(--card);
+  border-bottom: 1px solid var(--line);
+  flex: none;
+}
+
+.viewer__zoomvalue {
+  min-width: 54px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
 
 /* ------------------------------------------------------------------ editor */
 

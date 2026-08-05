@@ -17,6 +17,7 @@ import { parseRange, formatRange } from '../app/util/ranges.js';
 import { primeFontMetrics } from '../app/core/fonts.js';
 import { PageEditor } from '../app/ui/pageeditor.js';
 import { PageGrid } from '../app/ui/pagegrid.js';
+import { PageViewer } from '../app/ui/pageviewer.js';
 import { analysePage } from '../app/core/coverage.js';
 import { ocrAvailable, ocrPage } from '../app/core/ocr.js';
 import { ocrLines } from '../app/ui/ocrlayer.js';
@@ -743,6 +744,79 @@ test('recognised text can be selected in the app, not only in the saved file', a
     assert(ocrLines(scan).length > 0, 'ocrLines produced nothing to copy');
   } finally {
     editor.destroy();
+    host.remove();
+  }
+});
+
+// ------------------------------------------------------------------- viewer
+
+test('the viewer zooms, pans, and turns the page when there is nothing to pan', async () => {
+  const ws = await loadWorkspace(['report.pdf']);
+  const host = document.createElement('div');
+  host.className = 'viewer';
+  host.style.cssText = 'position:fixed;left:0;top:0;width:800px;height:600px;opacity:0;z-index:9999';
+  document.body.appendChild(host);
+
+  let currentPage = null;
+  const viewer = new PageViewer(host, ws, { onPageChange: (p) => { currentPage = p; } });
+
+  try {
+    await viewer.open(ws.pages[0]);
+    const scroller = host.querySelector('.viewer__scroll');
+
+    // Fit: the whole sheet is visible, so there is nothing to scroll.
+    viewer.setZoom(null);
+    assert(!viewer.canScroll(), 'the page should fit entirely at fit zoom');
+
+    // Zoomed in: now it is bigger than the window, and panning is just scrolling.
+    viewer.setZoom(3);
+    assert(viewer.canScroll(), 'a page at 300% should be scrollable');
+    scroller.scrollTop = 50;
+    scroller.scrollLeft = 40;
+    assert(scroller.scrollTop > 0 && scroller.scrollLeft > 0, 'the page did not pan');
+
+    // The wheel gesture that would otherwise do nothing turns the page instead.
+    viewer.setZoom(null);
+    const before = viewer.currentPageId;
+    scroller.dispatchEvent(new WheelEvent('wheel', { deltaY: 120, bubbles: true, cancelable: true }));
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert(viewer.currentPageId !== before, 'the wheel did not turn the page at fit zoom');
+    assert(currentPage, 'the page change was not reported');
+
+    // Zoomed in, the same gesture has to scroll rather than skip a page.
+    viewer.setZoom(3);
+    const held = viewer.currentPageId;
+    scroller.scrollTop = 0;
+    scroller.dispatchEvent(new WheelEvent('wheel', { deltaY: 40, bubbles: true, cancelable: true }));
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    assert(viewer.currentPageId === held, 'the wheel skipped a page while there was still page to scroll');
+  } finally {
+    viewer.destroy();
+    host.remove();
+  }
+});
+
+test('continuous layout stacks every page', async () => {
+  const ws = await loadWorkspace(['report.pdf']);
+  const host = document.createElement('div');
+  host.className = 'viewer';
+  host.style.cssText = 'position:fixed;left:0;top:0;width:800px;height:600px;opacity:0;z-index:9999';
+  document.body.appendChild(host);
+
+  const viewer = new PageViewer(host, ws, {});
+  try {
+    await viewer.open(ws.pages[0]);
+    assert(host.querySelectorAll('.viewer__page').length === 1, 'single layout should show one page');
+
+    viewer.setLayout('continuous');
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    const frames = [...host.querySelectorAll('.viewer__page')];
+    assert(frames.length === ws.pageCount, `expected ${ws.pageCount} pages, got ${frames.length}`);
+    // Stacked, so scrolling runs from one page into the next.
+    assert(frames[1].offsetTop > frames[0].offsetTop, 'pages are not stacked vertically');
+  } finally {
+    viewer.destroy();
     host.remove();
   }
 });

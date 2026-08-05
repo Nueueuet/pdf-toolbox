@@ -6,7 +6,9 @@ import { $, h, clear } from './util/dom.js';
 import { Workspace, normalizeQuarter } from './core/workspace.js';
 import { PageGrid } from './ui/pagegrid.js';
 import { PageEditor } from './ui/pageeditor.js';
-import { TOOLS, GROUPS } from './tools/index.js';
+import { TOOLS, GROUPS, DEFAULT_TOOL } from './tools/index.js';
+import { PageViewer } from './ui/pageviewer.js';
+import { loadViewerSettings, saveViewerSettings } from './tools/viewer.js';
 import { buildPdf } from './core/export.js';
 import { saveFile } from './core/download.js';
 import { primeFontMetrics } from './core/fonts.js';
@@ -32,6 +34,8 @@ class App {
       grid: $('#pageGrid'),
       editor: $('#editor'),
       editorbar: $('#editorbar'),
+      viewer: $('#viewer'),
+      viewerbar: $('#viewerbar'),
       editorLabel: $('#editorLabel'),
       wsbar: $('#wsbar'),
       rail: $('#rail'),
@@ -62,12 +66,24 @@ class App {
       },
       onDeleteAnnot: (annot) => this.deleteAnnot(annot),
       onStepPage: (delta) => this.stepPage(delta),
+      onViewPage: (page) => this.selectTool('viewer', page),
       // One undo step per editing session, not one per keystroke.
       onCommitText: (annot, after) => {
         this.ws.commit('Edit text', () => {
           annot.text = after.text;
           annot.marks = after.marks;
         });
+      },
+    });
+
+    this.viewer = new PageViewer($('#viewer'), this.ws, {
+      onPageChange: (page) => {
+        this.currentPageId = page?.id ?? this.currentPageId;
+        this.syncViewerLabel();
+      },
+      onZoomChange: (zoom, isFit) => {
+        $('#viewerZoom').textContent = `${Math.round(zoom * 100)}%`;
+        this.onViewerZoom?.(zoom, isFit);
       },
     });
 
@@ -91,7 +107,18 @@ class App {
     this.ws.on('selection', () => this.syncSelectionStatus());
 
     this.grid.setZoom(0.3);
+    // Run once for the empty document, so the shell starts in the same state the
+    // rest of the app maintains rather than in whatever the HTML happened to say.
+    this.onPagesChanged();
     primeFontMetrics().catch((err) => console.error('font metrics failed', err));
+
+    // A reading layout is a habit, not a per-document choice, so it is restored
+    // before the first document is even open.
+    loadViewerSettings().then((settings) => {
+      this.viewer.layout = settings.layout;
+      this.viewer.zoom = settings.zoom;
+      if (this.mode === 'viewer') this.viewer.render();
+    });
 
     // Dev-server only. `scripts/screenshots.mjs` uses this to capture the real
     // UI with real documents in it, rather than shipping a mocked-up picture to
@@ -206,6 +233,13 @@ class App {
     }
 
     $('#backToGrid').addEventListener('click', () => this.showGrid());
+    $('#viewerToGrid').addEventListener('click', () => this.showGrid());
+    $('#viewerZoomIn').addEventListener('click', () => this.viewer.zoomBy(1));
+    $('#viewerZoomOut').addEventListener('click', () => this.viewer.zoomBy(-1));
+    $('#viewerFit').addEventListener('click', () => {
+      this.viewer.setZoom(null);
+      this.persistViewerSettings();
+    });
     $('#prevPage').addEventListener('click', () => this.stepPage(-1));
     $('#nextPage').addEventListener('click', () => this.stepPage(1));
 
@@ -292,9 +326,19 @@ class App {
           return;
         }
       }
-      if (event.key === 'Escape' && !typing && this.mode === 'page') {
+      if (event.key === 'Escape' && !typing && this.onSinglePage) {
         this.showGrid();
         return;
+      }
+
+      // The viewer has its own idea of what the keys mean, since most of them
+      // are about moving around a page rather than between pages.
+      if (this.mode === 'viewer' && !typing && !meta) {
+        if (this.viewer.handleKey(event)) {
+          event.preventDefault();
+          this.syncViewerLabel();
+          return;
+        }
       }
 
       // Paging through a document with the arrow keys, as long as the caret is
@@ -354,7 +398,15 @@ class App {
    * not change what is being shown.
    */
   get mode() {
-    return this.surface === 'page' && this.currentPageId ? 'page' : 'grid';
+    if (!this.currentPageId) return 'grid';
+    if (this.surface === 'page') return 'page';
+    if (this.surface === 'viewer') return 'viewer';
+    return 'grid';
+  }
+
+  /** True while one page fills the workspace, whether for reading or editing. */
+  get onSinglePage() {
+    return this.mode === 'page' || this.mode === 'viewer';
   }
 
   currentPage() {
@@ -365,12 +417,20 @@ class App {
     const hasPages = this.ws.pageCount > 0;
     this.el.landing.hidden = hasPages;
     this.el.surface.hidden = !hasPages;
-    this.el.rail.hidden = !hasPages;
-    this.el.panel.hidden = !hasPages || !this.activeToolId;
     this.el.docBar.hidden = !hasPages;
     this.el.topActions.hidden = !hasPages;
 
-    if (hasPages && !this.activeToolId) this.selectTool('merge');
+    /*
+     * The empty state sits inside the app rather than replacing it. The rail
+     * stays where it is, greyed out — it shows what the app is for, and keeps
+     * the layout from jumping the moment a file arrives.
+     */
+    this.el.rail.hidden = false;
+    this.el.rail.classList.toggle('is-idle', !hasPages);
+    for (const item of this.el.rail.querySelectorAll('.rail__item')) item.disabled = !hasPages;
+    this.el.panel.hidden = !hasPages || !this.activeToolId;
+
+    if (hasPages && !this.activeToolId) this.selectTool(DEFAULT_TOOL);
 
     this.el.docTitle.value = this.ws.name;
     const sourceCount = new Set(this.ws.pages.map((p) => p.srcId)).size;
@@ -382,6 +442,10 @@ class App {
 
     this.grid.render();
     if (this.mode === 'page') this.editor.rebind(this.currentPage());
+    else if (this.mode === 'viewer') {
+      this.viewer.rebind(this.currentPage());
+      this.syncViewerLabel();
+    }
     this.syncSelectionStatus();
     this.syncHistoryButtons();
   }
@@ -431,12 +495,15 @@ class App {
 
     // The surface is switched before the panel is built so that a panel can read
     // the editor's state (selected annotation, crop rectangle) as it renders.
-    if (tool.mode === 'page') {
+    if (tool.mode === 'viewer') {
+      this.currentPageId = (page ?? this.currentPage())?.id ?? null;
+      this.showViewer();
+    } else if (tool.mode === 'page') {
       this.currentPageId = (page ?? this.currentPage())?.id ?? null;
       this.showEditor(tool.editorMode ?? 'select');
-    } else if (tool.mode === 'any' && this.mode === 'page') {
+    } else if (tool.mode === 'any' && this.onSinglePage) {
       // Works on either surface, so leave the one the user is looking at.
-      this.editor.setMode('select');
+      if (this.mode === 'page') this.editor.setMode('select');
     } else {
       this.showGrid();
     }
@@ -490,22 +557,52 @@ class App {
 
   showGrid() {
     const tool = TOOLS.find((t) => t.id === this.activeToolId);
-    // Leaving the editor means leaving the tool that needed it.
-    if (tool?.mode === 'page') {
+    // Leaving a single-page surface means leaving the tool that needed it.
+    if (tool?.mode === 'page' || tool?.mode === 'viewer') {
       this.selectTool('merge');
       return;
     }
     this.surface = 'grid';
     this.el.grid.hidden = false;
     this.el.editor.hidden = true;
+    this.el.viewer.hidden = true;
     this.el.wsbar.hidden = false;
     this.el.editorbar.hidden = true;
+    this.el.viewerbar.hidden = true;
     this.grid.render();
+  }
+
+  showViewer() {
+    this.surface = 'viewer';
+    this.el.grid.hidden = true;
+    this.el.editor.hidden = true;
+    this.el.viewer.hidden = false;
+    this.el.wsbar.hidden = true;
+    this.el.editorbar.hidden = true;
+    this.el.viewerbar.hidden = false;
+
+    const page = this.currentPage();
+    if (!page) return;
+    this.viewer.open(page);
+    this.syncViewerLabel();
+  }
+
+  syncViewerLabel() {
+    const index = this.ws.indexOf(this.currentPageId);
+    $('#viewerLabel').textContent = index >= 0
+      ? `Page ${index + 1} of ${this.ws.pageCount}`
+      : `${this.ws.pageCount} pages`;
+  }
+
+  persistViewerSettings() {
+    saveViewerSettings({ layout: this.viewer.layout, zoom: this.viewer.zoom });
   }
 
   showEditor(editorMode) {
     this.surface = 'page';
     this.el.grid.hidden = true;
+    this.el.viewer.hidden = true;
+    this.el.viewerbar.hidden = true;
     this.el.editor.hidden = false;
     this.el.wsbar.hidden = true;
     this.el.editorbar.hidden = false;
@@ -526,6 +623,13 @@ class App {
     if (!page) return;
     const tool = TOOLS.find((t) => t.id === this.activeToolId);
 
+    if (tool?.mode === 'viewer') {
+      this.currentPageId = page.id;
+      this.viewer.open(page);
+      this.syncViewerLabel();
+      return;
+    }
+
     /*
      * A tool that works on either surface stays put. Only a grid-only tool has
      * to hand over, because its panel cannot act on a single page — and it
@@ -533,7 +637,9 @@ class App {
      * with the arrows threw you out of OCR and into Write on the first press.
      */
     if (tool?.mode !== 'page' && tool?.mode !== 'any') {
-      this.selectTool('write', page);
+      // Opening a page from the grid means "show me this", so it lands in the
+      // viewer rather than in an editing tool.
+      this.selectTool(DEFAULT_TOOL, page);
       return;
     }
     this.currentPageId = page.id;
@@ -542,6 +648,10 @@ class App {
 
   /** Moves to the next or previous page, staying in the current tool. */
   stepPage(delta) {
+    if (this.mode === 'viewer') {
+      this.viewer.step(delta);
+      return;
+    }
     const index = this.ws.indexOf(this.currentPageId);
     const next = this.ws.pages[index + delta];
     if (!next) return;

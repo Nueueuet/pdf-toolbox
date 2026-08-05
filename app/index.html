@@ -75,8 +75,19 @@
                     title="Next page (right arrow)">›</button>
           </div>
 
+          <div class="viewerbar" id="viewerbar" hidden>
+            <button class="btn btn--ghost" id="viewerToGrid">← All pages</button>
+            <span class="editorbar__label" id="viewerLabel"></span>
+            <span class="wsbar__spacer"></span>
+            <button class="btn btn--icon" id="viewerZoomOut" aria-label="Zoom out" title="Zoom out (minus key)">−</button>
+            <span class="wsbar__zoomvalue" id="viewerZoom">100%</span>
+            <button class="btn btn--icon" id="viewerZoomIn" aria-label="Zoom in" title="Zoom in (plus key)">+</button>
+            <button class="btn btn--ghost" id="viewerFit" title="Fit the window (0 key)">Fit</button>
+          </div>
+
           <div class="grid" id="pageGrid"></div>
           <div class="editor" id="editor" hidden></div>
+          <div class="viewer" id="viewer" hidden></div>
         </section>
       </main>
 

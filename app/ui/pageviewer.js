@@ -1,0 +1,403 @@
+/**
+ * Reading surface.
+ *
+ * Separate from the page editor on purpose. Editing wants one page pinned to the
+ * window with handles and overlays on it; reading wants to move around freely,
+ * zoom in on small print, and carry on scrolling into the next page. Trying to
+ * be both at once is what makes most in-browser PDF viewers unpleasant.
+ *
+ * Panning is deliberately plain scrolling: once the page is bigger than the
+ * window, the wheel, shift-wheel, a tilt wheel, the scrollbars and the keyboard
+ * all work without a line of code. Only middle-drag has to be implemented, and
+ * the one genuine decision — that at fit zoom the wheel turns the page instead
+ * of doing nothing.
+ */
+import { h, clear } from '../util/dom.js';
+import { renderPageCanvas, viewportFor } from '../core/render.js';
+import { makeMapper, totalQuarter } from '../core/geometry.js';
+import { pageSize } from '../core/workspace.js';
+import { appendOcrText } from './ocrlayer.js';
+import { TextLayer } from '../../vendor/pdf.mjs';
+
+/** Zoom steps the buttons and keyboard walk through. */
+const ZOOM_STEPS = [0.25, 0.375, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4, 6, 8];
+const MIN_ZOOM = ZOOM_STEPS[0];
+const MAX_ZOOM = ZOOM_STEPS[ZOOM_STEPS.length - 1];
+/** Gap between pages in continuous layout, in CSS pixels. */
+const PAGE_GAP = 18;
+
+export class PageViewer {
+  /**
+   * @param {HTMLElement} root
+   * @param {import('../core/workspace.js').Workspace} ws
+   * @param {{onPageChange: (page) => void, onZoomChange: (zoom, fit) => void}} handlers
+   */
+  constructor(root, ws, handlers) {
+    this.root = root;
+    this.ws = ws;
+    this.handlers = handlers;
+
+    this.layout = 'single'; // 'single' | 'continuous'
+    this.zoom = null; // null means "fit the window"
+    this.currentPageId = null;
+    this.renderToken = 0;
+    this.frames = new Map(); // page id -> frame element
+
+    this.scroller = h('div.viewer__scroll');
+    this.pages = h('div.viewer__pages');
+    this.scroller.appendChild(this.pages);
+    clear(root).appendChild(this.scroller);
+
+    this.wireWheel();
+    this.wireMiddleDrag();
+    this.wireVisibility();
+
+    this.onResize = () => this.relayout();
+    window.addEventListener('resize', this.onResize);
+  }
+
+  destroy() {
+    window.removeEventListener('resize', this.onResize);
+    this.visibility?.disconnect();
+  }
+
+  // ------------------------------------------------------------------ state
+
+  setLayout(layout) {
+    if (this.layout === layout) return;
+    this.layout = layout;
+    this.render();
+  }
+
+  /** @param {number|null} zoom null fits the window */
+  setZoom(zoom) {
+    this.zoom = zoom === null ? null : Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
+    this.relayout();
+    this.handlers.onZoomChange?.(this.effectiveZoom(), this.zoom === null);
+  }
+
+  zoomBy(direction) {
+    const current = this.effectiveZoom();
+    const steps = direction > 0
+      ? ZOOM_STEPS.filter((z) => z > current + 0.001)
+      : ZOOM_STEPS.filter((z) => z < current - 0.001).reverse();
+    this.setZoom(steps.length ? steps[0] : current);
+  }
+
+  /** The scale actually in use, resolving "fit" against the current window. */
+  effectiveZoom() {
+    if (this.zoom !== null) return this.zoom;
+    return this.fitScale();
+  }
+
+  /** Scale at which the current page fits entirely inside the window. */
+  fitScale() {
+    const page = this.currentPage() ?? this.ws.pages[0];
+    if (!page) return 1;
+    const { w, h: ph } = pageSize(page);
+    const box = this.scroller.getBoundingClientRect();
+    const padding = 48;
+    return Math.max(
+      MIN_ZOOM,
+      Math.min((box.width - padding) / w, (box.height - padding) / ph) || 1,
+    );
+  }
+
+  currentPage() {
+    return this.ws.pageById(this.currentPageId) ?? this.ws.pages[0] ?? null;
+  }
+
+  // ----------------------------------------------------------------- render
+
+  async open(page) {
+    this.currentPageId = page?.id ?? this.ws.pages[0]?.id ?? null;
+    await this.render();
+  }
+
+  /** Points at the live page object after undo replaced the old one. */
+  async rebind(page) {
+    if (!page) return;
+    this.currentPageId = page.id;
+    await this.render();
+  }
+
+  async render() {
+    const token = ++this.renderToken;
+    clear(this.pages);
+    this.frames.clear();
+    if (this.ws.pageCount === 0) return;
+
+    const list = this.layout === 'continuous'
+      ? this.ws.pages
+      : [this.currentPage()].filter(Boolean);
+
+    for (const page of list) {
+      const frame = this.frame(page);
+      this.frames.set(page.id, frame);
+      this.pages.appendChild(frame);
+      this.visibility.observe(frame);
+    }
+
+    this.relayout();
+    if (this.layout === 'continuous') this.scrollToPage(this.currentPageId, 'auto');
+    if (token === this.renderToken) this.handlers.onZoomChange?.(this.effectiveZoom(), this.zoom === null);
+  }
+
+  frame(page) {
+    const { w, h: ph } = pageSize(page);
+    const frame = h('div.viewer__page', { dataset: { id: page.id, w: String(w), h: String(ph) } },
+      h('div.viewer__canvas'),
+      h('div.textlayer'),
+      h('span.viewer__number', String(this.ws.indexOf(page.id) + 1)),
+    );
+    return frame;
+  }
+
+  /** Applies the current scale to every frame, without re-rendering bitmaps. */
+  relayout() {
+    const scale = this.effectiveZoom();
+    this.pages.style.gap = `${PAGE_GAP}px`;
+
+    for (const [id, frame] of this.frames) {
+      const w = Number(frame.dataset.w);
+      const ph = Number(frame.dataset.h);
+      frame.style.width = `${Math.round(w * scale)}px`;
+      frame.style.height = `${Math.round(ph * scale)}px`;
+
+      const layer = frame.querySelector('.textlayer');
+      layer.style.width = `${w}px`;
+      layer.style.height = `${ph}px`;
+      layer.style.transform = `scale(${scale})`;
+
+      // A page whose bitmap was drawn for a very different scale is redrawn, so
+      // zooming in does not just enlarge a blurry picture.
+      const drawn = Number(frame.dataset.drawnScale || 0);
+      if (drawn && (scale / drawn > 1.5 || drawn / scale > 2.5)) frame.dataset.needsRedraw = '1';
+      if (this.isVisible(frame)) this.paint(frame, id);
+    }
+    this.root.classList.toggle('is-fit', !this.canScroll());
+  }
+
+  /** True when the content is larger than the window, i.e. panning does something. */
+  canScroll() {
+    return this.scroller.scrollHeight > this.scroller.clientHeight + 2
+      || this.scroller.scrollWidth > this.scroller.clientWidth + 2;
+  }
+
+  isVisible(frame) {
+    const box = frame.getBoundingClientRect();
+    const view = this.scroller.getBoundingClientRect();
+    return box.bottom > view.top - 400 && box.top < view.bottom + 400;
+  }
+
+  wireVisibility() {
+    // Pages are drawn as they come into view, so a long document does not
+    // rasterise itself in one go the moment it opens.
+    this.visibility = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        const id = entry.target.dataset.id;
+        this.paint(entry.target, id);
+        if (this.layout === 'continuous') this.setCurrentFromScroll();
+      }
+    }, { root: this.scroller, rootMargin: '400px 0px' });
+  }
+
+  async paint(frame, id) {
+    if (frame.dataset.painting === '1') return;
+    if (frame.dataset.drawnScale && frame.dataset.needsRedraw !== '1') return;
+
+    const page = this.ws.pageById(id);
+    if (!page) return;
+    frame.dataset.painting = '1';
+    delete frame.dataset.needsRedraw;
+
+    const token = this.renderToken;
+    try {
+      const scale = this.effectiveZoom();
+      const pixelScale = Math.min(4, scale * (window.devicePixelRatio || 1));
+      const { canvas } = await renderPageCanvas(this.ws, page, { scale: pixelScale });
+      if (token !== this.renderToken || !frame.isConnected) return;
+
+      canvas.className = 'viewer__bitmap';
+      clear(frame.querySelector('.viewer__canvas')).appendChild(canvas);
+      frame.dataset.drawnScale = String(scale);
+
+      await this.buildTextLayer(frame, page, token);
+    } catch (err) {
+      if (err?.name !== 'RenderingCancelledException') console.error('viewer paint failed', err);
+    } finally {
+      delete frame.dataset.painting;
+    }
+  }
+
+  /** Selectable text over the page — a viewer that cannot copy is half a viewer. */
+  async buildTextLayer(frame, page, token) {
+    const layer = frame.querySelector('.textlayer');
+    clear(layer);
+
+    const source = this.ws.source(page);
+    const hasOcr = Boolean(page.ocr?.words?.length);
+    const hasPdfText = source?.kind === 'pdf' && !page.rasterId;
+    if (!hasPdfText && !hasOcr) return;
+
+    const { viewport } = await viewportFor(this.ws, page, 1);
+    const mapper = makeMapper(viewport, page);
+    layer.style.setProperty('--scale-factor', '1');
+
+    if (hasPdfText) {
+      const pdfPage = await source.doc.getPage(page.srcIndex + 1);
+      if (token !== this.renderToken) return;
+      await new TextLayer({
+        textContentSource: pdfPage.streamTextContent(),
+        container: layer,
+        viewport: pdfPage.getViewport({ scale: 1, rotation: totalQuarter(page) }),
+      }).render();
+    }
+    if (hasOcr) appendOcrText(layer, page, mapper.displayWidth, mapper.displayHeight);
+  }
+
+  // -------------------------------------------------------------- navigation
+
+  scrollToPage(id, behavior = 'smooth') {
+    const frame = this.frames.get(id);
+    if (frame) this.scroller.scrollTo({ top: frame.offsetTop - PAGE_GAP, behavior });
+  }
+
+  /** In continuous layout, whichever page covers the middle of the window is "current". */
+  setCurrentFromScroll() {
+    const middle = this.scroller.scrollTop + this.scroller.clientHeight / 2;
+    let best = null;
+    for (const [id, frame] of this.frames) {
+      if (frame.offsetTop <= middle && frame.offsetTop + frame.offsetHeight >= middle) best = id;
+    }
+    if (best && best !== this.currentPageId) {
+      this.currentPageId = best;
+      this.handlers.onPageChange?.(this.ws.pageById(best));
+    }
+  }
+
+  step(delta) {
+    const index = this.ws.indexOf(this.currentPageId);
+    const next = this.ws.pages[index + delta];
+    if (!next) return false;
+
+    if (this.layout === 'continuous') {
+      this.currentPageId = next.id;
+      this.scrollToPage(next.id);
+    } else {
+      this.currentPageId = next.id;
+      this.render();
+      this.scroller.scrollTop = delta > 0 ? 0 : this.scroller.scrollHeight;
+    }
+    this.handlers.onPageChange?.(next);
+    return true;
+  }
+
+  // ------------------------------------------------------------------ input
+
+  wireWheel() {
+    this.scroller.addEventListener('wheel', (event) => {
+      // Ctrl or the pinch gesture zooms, as everywhere else.
+      if (event.ctrlKey || event.metaKey) {
+        event.preventDefault();
+        this.zoomBy(event.deltaY < 0 ? 1 : -1);
+        return;
+      }
+
+      // Shift turns a vertical wheel into a horizontal one. Browsers do this for
+      // ordinary scrollers already, but not once the content fits vertically.
+      if (event.shiftKey && event.deltaX === 0 && this.scroller.scrollWidth > this.scroller.clientWidth) {
+        event.preventDefault();
+        this.scroller.scrollLeft += event.deltaY;
+        return;
+      }
+
+      /*
+       * The whole sheet is visible and there is nothing to scroll, so the wheel
+       * would otherwise do nothing at all. Turning the page is what the gesture
+       * means at that point.
+       */
+      if (this.layout === 'single' && !this.canScroll() && Math.abs(event.deltaY) > 0) {
+        event.preventDefault();
+        const now = performance.now();
+        // Trackpads emit a stream of small deltas; one page per gesture.
+        if (now - (this.lastPageTurn ?? 0) < 220) return;
+        if (this.step(event.deltaY > 0 ? 1 : -1)) this.lastPageTurn = now;
+        return;
+      }
+
+      // In single layout, scrolling past the end moves on to the next page.
+      if (this.layout === 'single') {
+        const atBottom = this.scroller.scrollTop + this.scroller.clientHeight >= this.scroller.scrollHeight - 2;
+        const atTop = this.scroller.scrollTop <= 2;
+        const now = performance.now();
+        if ((event.deltaY > 0 && atBottom) || (event.deltaY < 0 && atTop)) {
+          if (now - (this.lastPageTurn ?? 0) < 320) return;
+          if (this.step(event.deltaY > 0 ? 1 : -1)) {
+            event.preventDefault();
+            this.lastPageTurn = now;
+          }
+        }
+      }
+    }, { passive: false });
+  }
+
+  /** Middle button held down drags the page around, like a hand tool. */
+  wireMiddleDrag() {
+    this.scroller.addEventListener('pointerdown', (event) => {
+      if (event.button !== 1) return;
+      event.preventDefault();
+
+      const startX = event.clientX;
+      const startY = event.clientY;
+      const fromLeft = this.scroller.scrollLeft;
+      const fromTop = this.scroller.scrollTop;
+      this.scroller.setPointerCapture(event.pointerId);
+      this.root.classList.add('is-panning');
+
+      const onMove = (move) => {
+        this.scroller.scrollLeft = fromLeft - (move.clientX - startX);
+        this.scroller.scrollTop = fromTop - (move.clientY - startY);
+      };
+      const onUp = () => {
+        this.scroller.releasePointerCapture(event.pointerId);
+        this.scroller.removeEventListener('pointermove', onMove);
+        this.scroller.removeEventListener('pointerup', onUp);
+        this.root.classList.remove('is-panning');
+      };
+      this.scroller.addEventListener('pointermove', onMove);
+      this.scroller.addEventListener('pointerup', onUp);
+    });
+
+    // Middle click otherwise opens the browser's own auto-scroll.
+    this.scroller.addEventListener('auxclick', (event) => {
+      if (event.button === 1) event.preventDefault();
+    });
+  }
+
+  /** @returns {boolean} whether the key was used */
+  handleKey(event) {
+    const step = 120;
+    switch (event.key) {
+      case 'ArrowRight':
+      case 'PageDown':
+        if (this.layout === 'single' && !this.canScroll()) return this.step(1);
+        this.scroller.scrollTop += this.scroller.clientHeight * 0.9;
+        return true;
+      case 'ArrowLeft':
+      case 'PageUp':
+        if (this.layout === 'single' && !this.canScroll()) return this.step(-1);
+        this.scroller.scrollTop -= this.scroller.clientHeight * 0.9;
+        return true;
+      case 'ArrowDown': this.scroller.scrollTop += step; return true;
+      case 'ArrowUp': this.scroller.scrollTop -= step; return true;
+      case 'Home': this.scroller.scrollTop = 0; return true;
+      case 'End': this.scroller.scrollTop = this.scroller.scrollHeight; return true;
+      case '+': case '=': this.zoomBy(1); return true;
+      case '-': this.zoomBy(-1); return true;
+      case '0': this.setZoom(null); return true;
+      default: return false;
+    }
+  }
+}
