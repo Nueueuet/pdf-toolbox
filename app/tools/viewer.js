@@ -13,11 +13,14 @@ import * as storage from '../core/storage.js';
 
 const SETTINGS_KEY = 'viewer';
 
+/** Reading arrangement a fresh install starts in. */
+export const DEFAULT_LAYOUT = 'single';
+
 export async function loadViewerSettings() {
   const saved = await storage.get(SETTINGS_KEY, {});
-  const layouts = ['single', 'continuous', 'horizontal'];
+  const layouts = ['single', 'continuous'];
   return {
-    layout: layouts.includes(saved.layout) ? saved.layout : 'single',
+    layout: layouts.includes(saved.layout) ? saved.layout : DEFAULT_LAYOUT,
     zoom: typeof saved.zoom === 'number' ? saved.zoom : null,
   };
 }
@@ -41,18 +44,15 @@ const viewer = {
       options: [
         {
           value: 'single',
-          label: 'One page at a time',
-          description: 'The wheel turns the page once the whole sheet is visible.',
+          label: 'Single page',
+          description: 'One page fills the window. The arrows at the sides turn to the next, '
+            + 'and so does the wheel once the whole sheet is visible.',
         },
         {
           value: 'continuous',
-          label: 'Continuous, downwards',
-          description: 'Pages stacked below one another; scrolling runs straight across the join.',
-        },
-        {
-          value: 'horizontal',
-          label: 'Side by side',
-          description: 'Pages in a row, read left to right — the arrangement the page grid uses.',
+          label: 'Continuous',
+          description: 'Pages stacked below one another; scrolling runs straight across the '
+            + 'join, showing the foot of one page and the head of the next.',
         },
       ],
       onchange: (value) => {

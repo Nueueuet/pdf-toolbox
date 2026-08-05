@@ -796,6 +796,41 @@ test('the viewer zooms, pans, and turns the page when there is nothing to pan', 
   }
 });
 
+test('the paging arrows appear only where they lead somewhere', async () => {
+  const ws = await loadWorkspace(['report.pdf']);
+  const host = document.createElement('div');
+  host.className = 'viewer';
+  host.style.cssText = 'position:fixed;left:0;top:0;width:800px;height:600px;opacity:0;z-index:9999';
+  document.body.appendChild(host);
+
+  const viewer = new PageViewer(host, ws, {});
+  const prev = () => host.querySelector('.editor__nav--prev');
+  const next = () => host.querySelector('.editor__nav--next');
+
+  try {
+    await viewer.open(ws.pages[0]);
+    assert(prev() && next(), 'the viewer has no paging arrows');
+    assert(prev().disabled, 'the back arrow should be gone on the first page');
+    assert(!next().disabled, 'the forward arrow should be available on the first page');
+
+    next().click();
+    assert(ws.indexOf(viewer.currentPageId) === 1, 'the arrow did not turn the page');
+    assert(!prev().disabled, 'the back arrow should appear once past the first page');
+
+    while (ws.indexOf(viewer.currentPageId) < ws.pageCount - 1) next().click();
+    assert(next().disabled, 'the forward arrow should be gone on the last page');
+
+    // Scrolling already crosses pages in continuous layout, so a page-turn
+    // button there would be a second, worse way of doing the same thing.
+    viewer.setLayout('continuous');
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert(prev().disabled && next().disabled, 'the arrows should go in continuous layout');
+  } finally {
+    viewer.destroy();
+    host.remove();
+  }
+});
+
 test('continuous layout stacks every page', async () => {
   const ws = await loadWorkspace(['report.pdf']);
   const host = document.createElement('div');

@@ -819,15 +819,9 @@ button { font: inherit; }
   justify-content: safe center;
 }
 
-/* Read left to right: the same pages, turned on their side. */
-.viewer[data-layout="horizontal"] .viewer__pages {
-  flex-direction: row;
-  align-items: safe center;
-  justify-content: safe center;
-  min-width: 100%;
-}
-
-.viewer[data-layout="horizontal"] .viewer__scroll { overflow-x: auto; }
+/* The paging arrows live here too, and stay put while the page moves. */
+.viewer { position: relative; }
+.viewer:hover .editor__nav { opacity: .85; }
 
 .viewer__page {
   position: relative;

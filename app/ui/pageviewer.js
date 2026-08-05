@@ -12,7 +12,7 @@
  * the one genuine decision — that at fit zoom the wheel turns the page instead
  * of doing nothing.
  */
-import { h, clear } from '../util/dom.js';
+import { h, clear, icon } from '../util/dom.js';
 import { renderPageCanvas, viewportFor } from '../core/render.js';
 import { makeMapper, totalQuarter } from '../core/geometry.js';
 import { pageSize } from '../core/workspace.js';
@@ -38,9 +38,9 @@ export class PageViewer {
     this.handlers = handlers;
 
     /**
-     * single      one page filling the window, the wheel turns to the next
-     * continuous  pages stacked, scrolling runs across the join
-     * horizontal  pages in a row, read left to right
+     * single      one page at a time, stepped through with the arrows at the
+     *             sides — the default, and how the page grid presents a document
+     * continuous  pages stacked, scrolling runs straight across the join
      */
     this.layout = 'single';
     this.zoom = null; // null means "fit the window"
@@ -51,7 +51,13 @@ export class PageViewer {
     this.scroller = h('div.viewer__scroll');
     this.pages = h('div.viewer__pages');
     this.scroller.appendChild(this.pages);
-    clear(root).appendChild(this.scroller);
+
+    // Turning the page from the sides of the view, where the pointer already is
+    // while reading. Siblings of the scroller, not children, so they stay put
+    // rather than scrolling away with the page.
+    this.prevNav = this.navButton('prev', 'M15 18 9 12l6-6', -1);
+    this.nextNav = this.navButton('next', 'M9 18l6-6-6-6', 1);
+    clear(root).append(this.scroller, this.prevNav, this.nextNav);
 
     this.wireWheel();
     this.wireMiddleDrag();
@@ -59,6 +65,27 @@ export class PageViewer {
 
     this.onResize = () => this.relayout();
     window.addEventListener('resize', this.onResize);
+  }
+
+  navButton(side, path, delta) {
+    return h(`button.editor__nav.editor__nav--${side}`, {
+      type: 'button',
+      title: side === 'prev' ? 'Previous page (left arrow)' : 'Next page (right arrow)',
+      'aria-label': side === 'prev' ? 'Previous page' : 'Next page',
+      onclick: () => this.step(delta),
+    }, icon(path, { size: 22, stroke: 2 }));
+  }
+
+  /**
+   * Hides the arrow that leads nowhere. In continuous layout they go entirely:
+   * scrolling already carries you between pages there, so a page-turn button
+   * would only be a second, worse way of doing the same thing.
+   */
+  syncNav() {
+    const index = this.ws.indexOf(this.currentPageId);
+    const paged = this.layout === 'single' && this.ws.pageCount > 1;
+    this.prevNav.disabled = !paged || index <= 0;
+    this.nextNav.disabled = !paged || index < 0 || index >= this.ws.pageCount - 1;
   }
 
   destroy() {
@@ -145,7 +172,8 @@ export class PageViewer {
     }
 
     this.relayout();
-    if (this.layout !== 'single') this.scrollToPage(this.currentPageId, 'auto');
+    this.syncNav();
+    if (this.layout === 'continuous') this.scrollToPage(this.currentPageId, 'auto');
     if (token === this.renderToken) this.handlers.onZoomChange?.(this.effectiveZoom(), this.zoom === null);
   }
 
@@ -267,29 +295,19 @@ export class PageViewer {
 
   scrollToPage(id, behavior = 'smooth') {
     const frame = this.frames.get(id);
-    if (!frame) return;
-    if (this.layout === 'horizontal') {
-      this.scroller.scrollTo({ left: frame.offsetLeft - PAGE_GAP, behavior });
-    } else {
-      this.scroller.scrollTo({ top: frame.offsetTop - PAGE_GAP, behavior });
-    }
+    if (frame) this.scroller.scrollTo({ top: frame.offsetTop - PAGE_GAP, behavior });
   }
 
   /** Whichever page covers the middle of the window is the one being read. */
   setCurrentFromScroll() {
-    const horizontal = this.layout === 'horizontal';
-    const middle = horizontal
-      ? this.scroller.scrollLeft + this.scroller.clientWidth / 2
-      : this.scroller.scrollTop + this.scroller.clientHeight / 2;
-
+    const middle = this.scroller.scrollTop + this.scroller.clientHeight / 2;
     let best = null;
     for (const [id, frame] of this.frames) {
-      const start = horizontal ? frame.offsetLeft : frame.offsetTop;
-      const size = horizontal ? frame.offsetWidth : frame.offsetHeight;
-      if (start <= middle && start + size >= middle) best = id;
+      if (frame.offsetTop <= middle && frame.offsetTop + frame.offsetHeight >= middle) best = id;
     }
     if (best && best !== this.currentPageId) {
       this.currentPageId = best;
+      this.syncNav();
       this.handlers.onPageChange?.(this.ws.pageById(best));
     }
   }
@@ -306,6 +324,7 @@ export class PageViewer {
     } else {
       this.scrollToPage(next.id);
     }
+    this.syncNav();
     this.handlers.onPageChange?.(next);
     return true;
   }
@@ -326,16 +345,6 @@ export class PageViewer {
       // Shift turns a vertical wheel into a horizontal one. Browsers do this for
       // ordinary scrollers already, but not once the content fits vertically.
       if (event.shiftKey && event.deltaX === 0 && canScrollSideways) {
-        event.preventDefault();
-        this.scroller.scrollLeft += event.deltaY;
-        return;
-      }
-
-      /*
-       * Reading left to right, the wheel should carry you along the row. Without
-       * this it would scroll a vertical axis that has nowhere to go.
-       */
-      if (this.layout === 'horizontal' && event.deltaX === 0 && canScrollSideways) {
         event.preventDefault();
         this.scroller.scrollLeft += event.deltaY;
         return;
