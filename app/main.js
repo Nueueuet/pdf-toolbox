@@ -12,7 +12,7 @@ import { loadViewerSettings, saveViewerSettings } from './tools/viewer.js';
 import { buildPdf } from './core/export.js';
 import { saveFile } from './core/download.js';
 import { primeFontMetrics } from './core/fonts.js';
-import { passwordPrompt, modal } from './ui/modal.js';
+import { passwordPrompt, modal, confirmDialog } from './ui/modal.js';
 import { toast, progressToast } from './ui/toast.js';
 import { baseName, formatBytes } from './util/format.js';
 import { IN_EXTENSION } from './core/paths.js';
@@ -208,6 +208,7 @@ class App {
   wireChrome() {
     $('#pickBtn').addEventListener('click', () => this.pickFiles());
     $('#addFilesBtn').addEventListener('click', () => this.pickFiles());
+    $('#clearAllBtn').addEventListener('click', () => this.startOver());
     $('#exportBtn').addEventListener('click', () => this.exportCurrent());
     this.el.undo.addEventListener('click', () => this.ws.undo());
     this.el.redo.addEventListener('click', () => this.ws.redo());
@@ -255,7 +256,7 @@ class App {
    */
   guardAgainstReload() {
     window.addEventListener('beforeunload', (event) => {
-      if (this.ws.pageCount === 0) return;
+      if (this.ws.pageCount === 0 && this.ws.removed.length === 0) return;
       event.preventDefault();
       // Older browsers need returnValue set; the string itself is ignored.
       event.returnValue = 'Your open document has not been saved.';
@@ -381,6 +382,38 @@ class App {
     }
   }
 
+  /**
+   * Empties the workspace, as if the tab had just been opened.
+   *
+   * Unlike removing pages, this is not undoable — it clears the history along
+   * with everything else — so it asks first. The wording mirrors the warning on
+   * closing the tab, because it is the same loss.
+   */
+  async startOver() {
+    if (this.ws.pageCount === 0 && this.ws.removed.length === 0) return;
+
+    const ok = await confirmDialog({
+      title: 'Start over?',
+      message: 'Every page, every edit and the whole undo history will be discarded, '
+        + 'and the workspace will be empty. Files you have already saved are not affected. '
+        + 'This cannot be undone.',
+      confirmLabel: 'Discard everything',
+      tone: 'danger',
+    });
+    if (!ok) return;
+
+    this.ws.reset();
+    this.currentPageId = null;
+    this.activeToolId = null;
+    this.surface = 'grid';
+    for (const cleanup of this.panelCleanups) cleanup();
+    this.panelCleanups = [];
+    this.annotListeners = [];
+    clear(this.el.panelBody);
+    for (const item of this.el.rail.querySelectorAll('.rail__item')) item.classList.remove('is-active');
+    toast('Workspace cleared', { tone: 'info' });
+  }
+
   async addBlankPage() {
     // A blank page needs a real source, so make a one-page PDF on the fly.
     const doc = await PDFDocument.create();
@@ -415,10 +448,17 @@ class App {
 
   onPagesChanged() {
     const hasPages = this.ws.pageCount > 0;
+    /*
+     * An empty document with something in the recoverable list is not really
+     * empty: the panel has to stay reachable, or removing the last page would
+     * put its only way back out of reach.
+     */
+    const hasWork = hasPages || this.ws.removed.length > 0;
+
     this.el.landing.hidden = hasPages;
     this.el.surface.hidden = !hasPages;
     this.el.docBar.hidden = !hasPages;
-    this.el.topActions.hidden = !hasPages;
+    this.el.topActions.hidden = !hasWork;
 
     /*
      * The empty state sits inside the app rather than replacing it. The rail
@@ -426,9 +466,13 @@ class App {
      * the layout from jumping the moment a file arrives.
      */
     this.el.rail.hidden = false;
-    this.el.rail.classList.toggle('is-idle', !hasPages);
-    for (const item of this.el.rail.querySelectorAll('.rail__item')) item.disabled = !hasPages;
-    this.el.panel.hidden = !hasPages || !this.activeToolId;
+    this.el.rail.classList.toggle('is-idle', !hasWork);
+    for (const item of this.el.rail.querySelectorAll('.rail__item')) {
+      // With pages gone but a full recoverable list, Remove is the one tool
+      // that still has something to do.
+      item.disabled = hasPages ? false : !(hasWork && item.dataset.tool === 'remove');
+    }
+    this.el.panel.hidden = !hasWork || !this.activeToolId;
 
     if (hasPages && !this.activeToolId) this.selectTool(DEFAULT_TOOL);
 
@@ -733,10 +777,9 @@ class App {
 
   removePages(pages, label) {
     if (pages.length === 0) return;
-    if (pages.length >= this.ws.pageCount) {
-      toast('At least one page has to stay', { tone: 'error' });
-      return;
-    }
+    // Removing the last page is allowed: it goes to the recoverable list like
+    // any other, and undo brings it straight back. Refusing was protecting
+    // nothing.
     this.ws.commit(label ?? `Remove ${pages.length} ${pages.length === 1 ? 'page' : 'pages'}`, () => {
       for (const page of pages) page.meta.removedFrom = this.ws.indexOf(page.id);
       const ids = new Set(pages.map((p) => p.id));

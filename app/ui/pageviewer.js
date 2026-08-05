@@ -37,7 +37,12 @@ export class PageViewer {
     this.ws = ws;
     this.handlers = handlers;
 
-    this.layout = 'single'; // 'single' | 'continuous'
+    /**
+     * single      one page filling the window, the wheel turns to the next
+     * continuous  pages stacked, scrolling runs across the join
+     * horizontal  pages in a row, read left to right
+     */
+    this.layout = 'single';
     this.zoom = null; // null means "fit the window"
     this.currentPageId = null;
     this.renderToken = 0;
@@ -127,9 +132,10 @@ export class PageViewer {
     this.frames.clear();
     if (this.ws.pageCount === 0) return;
 
-    const list = this.layout === 'continuous'
-      ? this.ws.pages
-      : [this.currentPage()].filter(Boolean);
+    this.root.dataset.layout = this.layout;
+    const list = this.layout === 'single'
+      ? [this.currentPage()].filter(Boolean)
+      : this.ws.pages;
 
     for (const page of list) {
       const frame = this.frame(page);
@@ -139,7 +145,7 @@ export class PageViewer {
     }
 
     this.relayout();
-    if (this.layout === 'continuous') this.scrollToPage(this.currentPageId, 'auto');
+    if (this.layout !== 'single') this.scrollToPage(this.currentPageId, 'auto');
     if (token === this.renderToken) this.handlers.onZoomChange?.(this.effectiveZoom(), this.zoom === null);
   }
 
@@ -261,15 +267,26 @@ export class PageViewer {
 
   scrollToPage(id, behavior = 'smooth') {
     const frame = this.frames.get(id);
-    if (frame) this.scroller.scrollTo({ top: frame.offsetTop - PAGE_GAP, behavior });
+    if (!frame) return;
+    if (this.layout === 'horizontal') {
+      this.scroller.scrollTo({ left: frame.offsetLeft - PAGE_GAP, behavior });
+    } else {
+      this.scroller.scrollTo({ top: frame.offsetTop - PAGE_GAP, behavior });
+    }
   }
 
-  /** In continuous layout, whichever page covers the middle of the window is "current". */
+  /** Whichever page covers the middle of the window is the one being read. */
   setCurrentFromScroll() {
-    const middle = this.scroller.scrollTop + this.scroller.clientHeight / 2;
+    const horizontal = this.layout === 'horizontal';
+    const middle = horizontal
+      ? this.scroller.scrollLeft + this.scroller.clientWidth / 2
+      : this.scroller.scrollTop + this.scroller.clientHeight / 2;
+
     let best = null;
     for (const [id, frame] of this.frames) {
-      if (frame.offsetTop <= middle && frame.offsetTop + frame.offsetHeight >= middle) best = id;
+      const start = horizontal ? frame.offsetLeft : frame.offsetTop;
+      const size = horizontal ? frame.offsetWidth : frame.offsetHeight;
+      if (start <= middle && start + size >= middle) best = id;
     }
     if (best && best !== this.currentPageId) {
       this.currentPageId = best;
@@ -282,13 +299,12 @@ export class PageViewer {
     const next = this.ws.pages[index + delta];
     if (!next) return false;
 
-    if (this.layout === 'continuous') {
-      this.currentPageId = next.id;
-      this.scrollToPage(next.id);
-    } else {
-      this.currentPageId = next.id;
+    this.currentPageId = next.id;
+    if (this.layout === 'single') {
       this.render();
       this.scroller.scrollTop = delta > 0 ? 0 : this.scroller.scrollHeight;
+    } else {
+      this.scrollToPage(next.id);
     }
     this.handlers.onPageChange?.(next);
     return true;
@@ -305,9 +321,21 @@ export class PageViewer {
         return;
       }
 
+      const canScrollSideways = this.scroller.scrollWidth > this.scroller.clientWidth + 2;
+
       // Shift turns a vertical wheel into a horizontal one. Browsers do this for
       // ordinary scrollers already, but not once the content fits vertically.
-      if (event.shiftKey && event.deltaX === 0 && this.scroller.scrollWidth > this.scroller.clientWidth) {
+      if (event.shiftKey && event.deltaX === 0 && canScrollSideways) {
+        event.preventDefault();
+        this.scroller.scrollLeft += event.deltaY;
+        return;
+      }
+
+      /*
+       * Reading left to right, the wheel should carry you along the row. Without
+       * this it would scroll a vertical axis that has nowhere to go.
+       */
+      if (this.layout === 'horizontal' && event.deltaX === 0 && canScrollSideways) {
         event.preventDefault();
         this.scroller.scrollLeft += event.deltaY;
         return;

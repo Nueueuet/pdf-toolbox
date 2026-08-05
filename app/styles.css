@@ -30,9 +30,16 @@
 /* Several blocks below set `display`, which would otherwise beat [hidden]. */
 [hidden] { display: none !important; }
 
+/*
+ * The shell is exactly the window, and nothing about it scrolls. Only the
+ * document does — anything else means the toolbar and the tool rail slide away
+ * while you are reading, which is never what you wanted.
+ */
 html, body {
   height: 100%;
   margin: 0;
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 body {
@@ -243,7 +250,9 @@ button { font: inherit; }
   display: flex;
   flex-direction: column;
   min-height: 0;
-  height: 100%;
+  /* `flex: 1` rather than `height: 100%`: a percentage height on a flex item
+     inside a grid row overflows its track instead of filling it. */
+  flex: 1;
 }
 
 .wsbar, .editorbar {
@@ -809,6 +818,16 @@ button { font: inherit; }
   /* Centred while it fits, top-aligned once it is taller than the window. */
   justify-content: safe center;
 }
+
+/* Read left to right: the same pages, turned on their side. */
+.viewer[data-layout="horizontal"] .viewer__pages {
+  flex-direction: row;
+  align-items: safe center;
+  justify-content: safe center;
+  min-width: 100%;
+}
+
+.viewer[data-layout="horizontal"] .viewer__scroll { overflow-x: auto; }
 
 .viewer__page {
   position: relative;

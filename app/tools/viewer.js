@@ -15,8 +15,9 @@ const SETTINGS_KEY = 'viewer';
 
 export async function loadViewerSettings() {
   const saved = await storage.get(SETTINGS_KEY, {});
+  const layouts = ['single', 'continuous', 'horizontal'];
   return {
-    layout: saved.layout === 'continuous' ? 'continuous' : 'single',
+    layout: layouts.includes(saved.layout) ? saved.layout : 'single',
     zoom: typeof saved.zoom === 'number' ? saved.zoom : null,
   };
 }
@@ -45,8 +46,13 @@ const viewer = {
         },
         {
           value: 'continuous',
-          label: 'Continuous',
+          label: 'Continuous, downwards',
           description: 'Pages stacked below one another; scrolling runs straight across the join.',
+        },
+        {
+          value: 'horizontal',
+          label: 'Side by side',
+          description: 'Pages in a row, read left to right — the arrangement the page grid uses.',
         },
       ],
       onchange: (value) => {
@@ -97,9 +103,9 @@ const viewer = {
         hint('Remembered for next time.'),
       ),
       section('Moving around',
-        hint('Wheel scrolls up and down · Shift and wheel moves sideways · hold the middle '
-          + 'mouse button to drag the page · Ctrl and wheel zooms · arrow keys, Page Up and '
-          + 'Page Down work too.'),
+        hint('Wheel scrolls · Shift and wheel moves sideways · hold the middle mouse button '
+          + 'to drag the page · Ctrl and wheel zooms · arrow keys, Page Up and Page Down work '
+          + 'too. Only the document moves — the toolbars stay put.'),
       ),
     );
   },
