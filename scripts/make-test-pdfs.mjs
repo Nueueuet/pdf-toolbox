@@ -96,7 +96,33 @@ async function shorts() {
   }
 }
 
+/**
+ * A wide sheet in the shape of a building drawing: far too broad to fit, so
+ * panning has to reach both its left and its right edge.
+ */
+async function blueprint() {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.HelveticaBold);
+  const [w, ph] = [2384, 842]; // A1 landscape-ish, roughly 3:1
+  const page = doc.addPage([w, ph]);
+
+  page.drawRectangle({ x: 0, y: 0, width: w, height: ph, color: rgb(0.06, 0.16, 0.36) });
+  for (let x = 40; x < w; x += 40) {
+    page.drawLine({ start: { x, y: 0 }, end: { x, y: ph }, thickness: 0.5, color: rgb(0.2, 0.32, 0.55) });
+  }
+  for (let y = 40; y < ph; y += 40) {
+    page.drawLine({ start: { x: 0, y }, end: { x: w, y }, thickness: 0.5, color: rgb(0.2, 0.32, 0.55) });
+  }
+  // Labels in the far corners: if either is unreachable, panning is broken.
+  page.drawText('LEFT EDGE', { x: 24, y: ph / 2, size: 34, font, color: rgb(1, 0.85, 0.3) });
+  page.drawText('RIGHT EDGE', { x: w - 250, y: ph / 2, size: 34, font, color: rgb(1, 0.85, 0.3) });
+  page.drawText('SITE PLAN — SHEET A-101', { x: 24, y: ph - 60, size: 26, font, color: rgb(1, 1, 1) });
+
+  await writeFile(path.join(outDir, 'blueprint.pdf'), await doc.save());
+}
+
 await report();
 await mixed();
 await shorts();
+await blueprint();
 console.log(`wrote sample PDFs to ${path.relative(process.cwd(), outDir)}`);

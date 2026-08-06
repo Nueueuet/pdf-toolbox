@@ -79,7 +79,12 @@
 
           <div class="viewerbar" id="viewerbar" hidden>
             <button class="btn btn--ghost" id="viewerToGrid">← All pages</button>
-            <span class="editorbar__label" id="viewerLabel"></span>
+            <label class="pagejump">
+              <span class="pagejump__prefix">Page</span>
+              <input class="pagejump__input" id="viewerPageInput" type="number" min="1" step="1"
+                     aria-label="Go to page" title="Type a page number to jump there">
+              <span class="pagejump__total" id="viewerPageTotal">of 1</span>
+            </label>
             <span class="wsbar__spacer"></span>
             <button class="btn btn--icon" id="viewerZoomOut" aria-label="Zoom out" title="Zoom out (minus key)">−</button>
             <span class="wsbar__zoomvalue" id="viewerZoom">100%</span>

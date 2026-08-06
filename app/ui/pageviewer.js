@@ -62,6 +62,7 @@ export class PageViewer {
     this.wireWheel();
     this.wireMiddleDrag();
     this.wireVisibility();
+    this.wireScroll();
 
     this.onResize = () => this.relayout();
     window.addEventListener('resize', this.onResize);
@@ -103,9 +104,43 @@ export class PageViewer {
 
   /** @param {number|null} zoom null fits the window */
   setZoom(zoom) {
+    const centre = this.centreFraction();
     this.zoom = zoom === null ? null : Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
     this.relayout();
+    // Zooming keeps whatever was in the middle in the middle. Without this the
+    // view would snap back to a corner every time the margins change size.
+    this.restoreCentre(centre);
     this.handlers.onZoomChange?.(this.effectiveZoom(), this.zoom === null);
+  }
+
+  /** Where the middle of the window sits within the page area, as 0..1. */
+  centreFraction() {
+    const s = this.scroller;
+    const { top, left, right, bottom } = this.padding();
+    const width = s.scrollWidth - left - right;
+    const height = s.scrollHeight - top - bottom;
+    return {
+      x: width > 0 ? (s.scrollLeft + s.clientWidth / 2 - left) / width : 0.5,
+      y: height > 0 ? (s.scrollTop + s.clientHeight / 2 - top) / height : 0.5,
+    };
+  }
+
+  restoreCentre({ x, y }) {
+    const s = this.scroller;
+    const { top, left, right, bottom } = this.padding();
+    s.scrollLeft = left + x * (s.scrollWidth - left - right) - s.clientWidth / 2;
+    s.scrollTop = top + y * (s.scrollHeight - top - bottom) - s.clientHeight / 2;
+  }
+
+  /** The empty room around the pages, as set by applyPanRoom. */
+  padding() {
+    const style = getComputedStyle(this.pages);
+    return {
+      top: parseFloat(style.paddingTop) || 0,
+      right: parseFloat(style.paddingRight) || 0,
+      bottom: parseFloat(style.paddingBottom) || 0,
+      left: parseFloat(style.paddingLeft) || 0,
+    };
   }
 
   zoomBy(direction) {
@@ -127,11 +162,16 @@ export class PageViewer {
     const page = this.currentPage() ?? this.ws.pages[0];
     if (!page) return 1;
     const { w, h: ph } = pageSize(page);
-    const box = this.scroller.getBoundingClientRect();
+    // clientWidth, not the outer box: the gutter kept for the scrollbar is not
+    // room the page can use, and on a very wide sheet that difference is what
+    // stops "fit" from actually fitting.
     const padding = 48;
     return Math.max(
       MIN_ZOOM,
-      Math.min((box.width - padding) / w, (box.height - padding) / ph) || 1,
+      Math.min(
+        (this.scroller.clientWidth - padding) / w,
+        (this.scroller.clientHeight - padding) / ph,
+      ) || 1,
     );
   }
 
@@ -187,16 +227,42 @@ export class PageViewer {
     return frame;
   }
 
+  /**
+   * Room to push the page past the edge of the window, so a detail sitting in a
+   * corner can be brought to the middle to look at. A quarter of the window on
+   * each side, and only on an axis that can actually be panned — adding it while
+   * the whole sheet fits would invent scrollbars and rob the wheel of its
+   * page-turning job.
+   */
+  applyPanRoom(contentWidth, contentHeight) {
+    const view = { width: this.scroller.clientWidth, height: this.scroller.clientHeight };
+    const base = 24;
+    // A pixel of slack, so a page rounded to exactly the fitting size is not
+    // mistaken for one that overflows.
+    const fitsX = contentWidth <= view.width - base * 2 + 1;
+    const fitsY = contentHeight <= view.height - base * 2 + 1;
+    const padX = fitsX ? base : Math.round(view.width * 0.25);
+    const padY = fitsY ? base : Math.round(view.height * 0.25);
+    this.pages.style.padding = `${padY}px ${padX}px`;
+  }
+
   /** Applies the current scale to every frame, without re-rendering bitmaps. */
   relayout() {
     const scale = this.effectiveZoom();
     this.pages.style.gap = `${PAGE_GAP}px`;
+    let contentWidth = 0;
+    let contentHeight = 0;
 
     for (const [id, frame] of this.frames) {
       const w = Number(frame.dataset.w);
       const ph = Number(frame.dataset.h);
-      frame.style.width = `${Math.round(w * scale)}px`;
-      frame.style.height = `${Math.round(ph * scale)}px`;
+      const pageWidth = Math.round(w * scale);
+      const pageHeight = Math.round(ph * scale);
+      frame.style.width = `${pageWidth}px`;
+      frame.style.height = `${pageHeight}px`;
+      contentWidth = Math.max(contentWidth, pageWidth);
+      // The gap sits between pages, never after the last one.
+      contentHeight += contentHeight ? pageHeight + PAGE_GAP : pageHeight;
 
       const layer = frame.querySelector('.textlayer');
       layer.style.width = `${w}px`;
@@ -209,6 +275,7 @@ export class PageViewer {
       if (drawn && (scale / drawn > 1.5 || drawn / scale > 2.5)) frame.dataset.needsRedraw = '1';
       if (this.isVisible(frame)) this.paint(frame, id);
     }
+    this.applyPanRoom(contentWidth, contentHeight);
     this.root.classList.toggle('is-fit', !this.canScroll());
   }
 
@@ -293,9 +360,57 @@ export class PageViewer {
 
   // -------------------------------------------------------------- navigation
 
+  /**
+   * Puts a freshly turned-to page under the eye rather than in the empty room
+   * around it: its own top or bottom edge, horizontally centred.
+   */
+  restAtEdge(edge) {
+    const pad = this.padding();
+    const padY = edge === 'top' ? pad.top : pad.bottom;
+    this.scroller.scrollTop = edge === 'top'
+      ? padY
+      : this.scroller.scrollHeight - this.scroller.clientHeight - padY;
+    this.scroller.scrollLeft = (this.scroller.scrollWidth - this.scroller.clientWidth) / 2;
+  }
+
+  /**
+   * Jumps to a page by id. In a stack that means scrolling to it, keeping the
+   * pages already drawn; one page at a time means swapping the page over.
+   */
+  goTo(id) {
+    const page = this.ws.pageById(id);
+    if (!page) return false;
+    this.currentPageId = id;
+    if (this.layout === 'continuous') {
+      this.scrollToPage(id);
+      this.syncNav();
+    } else {
+      this.render().then(() => this.restAtEdge('top'));
+    }
+    this.handlers.onPageChange?.(page);
+    return true;
+  }
+
   scrollToPage(id, behavior = 'smooth') {
     const frame = this.frames.get(id);
     if (frame) this.scroller.scrollTo({ top: frame.offsetTop - PAGE_GAP, behavior });
+  }
+
+  /**
+   * Keeps the page number honest while scrolling through a stack. Watching for
+   * pages coming into view is not enough on its own: once they are all drawn,
+   * nothing fires again and the number would sit still while the pages move.
+   */
+  wireScroll() {
+    let pending = false;
+    this.scroller.addEventListener('scroll', () => {
+      if (this.layout !== 'continuous' || pending) return;
+      pending = true;
+      setTimeout(() => {
+        pending = false;
+        this.setCurrentFromScroll();
+      }, 80);
+    }, { passive: true });
   }
 
   /** Whichever page covers the middle of the window is the one being read. */
@@ -319,8 +434,9 @@ export class PageViewer {
 
     this.currentPageId = next.id;
     if (this.layout === 'single') {
-      this.render();
-      this.scroller.scrollTop = delta > 0 ? 0 : this.scroller.scrollHeight;
+      // Sized only once the render has laid the new page out, so the resting
+      // place is worked out after applyPanRoom has set the margins.
+      this.render().then(() => this.restAtEdge(delta > 0 ? 'top' : 'bottom'));
     } else {
       this.scrollToPage(next.id);
     }

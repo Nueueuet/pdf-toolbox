@@ -235,6 +235,17 @@ class App {
 
     $('#backToGrid').addEventListener('click', () => this.showGrid());
     $('#viewerToGrid').addEventListener('click', () => this.showGrid());
+    const pageInput = $('#viewerPageInput');
+    pageInput.addEventListener('change', () => this.goToPage(pageInput.value));
+    pageInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        this.goToPage(pageInput.value);
+        pageInput.blur();
+      } else if (event.key === 'Escape') {
+        this.syncViewerLabel();
+        pageInput.blur();
+      }
+    });
     $('#viewerZoomIn').addEventListener('click', () => this.viewer.zoomBy(1));
     $('#viewerZoomOut').addEventListener('click', () => this.viewer.zoomBy(-1));
     $('#viewerFit').addEventListener('click', () => {
@@ -633,9 +644,22 @@ class App {
 
   syncViewerLabel() {
     const index = this.ws.indexOf(this.currentPageId);
-    $('#viewerLabel').textContent = index >= 0
-      ? `Page ${index + 1} of ${this.ws.pageCount}`
-      : `${this.ws.pageCount} pages`;
+    const input = $('#viewerPageInput');
+    input.max = String(Math.max(1, this.ws.pageCount));
+    // Left alone while it is being typed into, or the caret jumps mid-entry.
+    if (document.activeElement !== input) input.value = index >= 0 ? String(index + 1) : '';
+    $('#viewerPageTotal').textContent = `of ${this.ws.pageCount}`;
+  }
+
+  /** Jumps to a page number typed into the viewer's page field. */
+  goToPage(raw) {
+    const number = Number(raw);
+    if (!Number.isFinite(number)) return this.syncViewerLabel();
+    const page = this.ws.pages[Math.min(this.ws.pageCount, Math.max(1, Math.round(number))) - 1];
+    if (!page) return this.syncViewerLabel();
+    this.currentPageId = page.id;
+    this.viewer.goTo(page.id);
+    this.syncViewerLabel();
   }
 
   persistViewerSettings() {

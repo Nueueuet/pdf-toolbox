@@ -292,6 +292,41 @@ button { font: inherit; }
 
 .editorbar__label { font-weight: 600; }
 
+.pagejump {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.pagejump__prefix,
+.pagejump__total {
+  font-size: 13px;
+  color: var(--ink-faint);
+  font-weight: 500;
+}
+
+.pagejump__input {
+  width: 3.6em;
+  padding: 4px 6px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--bg);
+  font: inherit;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  color: var(--ink);
+}
+
+.pagejump__input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* The spinner arrows crowd a field this narrow; the keyboard still steps it. */
+.pagejump__input::-webkit-inner-spin-button { display: none; }
+
 .segmented {
   display: flex;
   padding: 3px;
@@ -806,17 +841,35 @@ button { font: inherit; }
 .viewer__scroll {
   flex: 1;
   overflow: auto;
-  padding: 24px;
   scrollbar-gutter: stable;
 }
 
 .viewer__pages {
   display: flex;
   flex-direction: column;
-  align-items: center;
   min-height: 100%;
-  /* Centred while it fits, top-aligned once it is taller than the window. */
+  /*
+   * Grows to the widest page so the gutter below is really beside the page
+   * rather than underneath it. `min-width` keeps it filling the window while
+   * everything still fits, which is what centring needs.
+   */
+  width: max-content;
+  min-width: 100%;
+  /*
+   * `safe` on both axes, and it matters on the horizontal one especially.
+   * Plain `center` makes a page wider than the window overhang on both sides,
+   * and the overhang to the left is simply unreachable — scrollLeft cannot go
+   * below zero. On a wide drawing that means the left edge can never be seen.
+   */
   justify-content: safe center;
+  align-items: safe center;
+  /*
+   * The gutter lives here rather than on the scroller because a block container
+   * drops its trailing padding out of scrollWidth: with it on .viewer__scroll
+   * you could pan past the left edge but not the right. As padding of the
+   * content itself it counts on both sides. Sized by applyPanRoom.
+   */
+  padding: 24px;
 }
 
 /* The paging arrows live here too, and stay put while the page moves. */

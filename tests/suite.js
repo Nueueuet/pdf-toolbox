@@ -856,6 +856,87 @@ test('continuous layout stacks every page', async () => {
   }
 });
 
+test('a wide sheet can be panned past all four of its edges', async () => {
+  const ws = await loadWorkspace(['blueprint.pdf']);
+  const host = document.createElement('div');
+  host.className = 'viewer';
+  host.style.cssText = 'position:fixed;left:0;top:0;width:800px;height:600px;opacity:0;z-index:9999';
+  document.body.appendChild(host);
+
+  const viewer = new PageViewer(host, ws, {});
+  try {
+    await viewer.open(ws.pages[0]);
+    const scroller = host.querySelector('.viewer__scroll');
+    const frame = host.querySelector('.viewer__page');
+
+    // Nothing to pan while it all fits, so no empty room is invented either.
+    viewer.setZoom(null);
+    assert(!viewer.canScroll(), 'the whole sheet should fit at fit zoom');
+    assert(scroller.scrollWidth <= scroller.clientWidth + 2, 'fit zoom should not need sideways scrolling');
+
+    viewer.setZoom(1);
+    const quarterX = scroller.clientWidth * 0.25;
+    const quarterY = scroller.clientHeight * 0.25;
+    const gap = (edge) => {
+      const f = frame.getBoundingClientRect();
+      const v = scroller.getBoundingClientRect();
+      return { left: f.left - v.left, right: v.right - f.right, top: f.top - v.top, bottom: v.bottom - f.bottom };
+    };
+    // A quarter of the window on every side, so a detail in any corner of a
+    // wide drawing can be dragged into the middle to be looked at.
+    scroller.scrollLeft = 0;
+    scroller.scrollTop = 0;
+    const start = gap();
+    assert(start.left >= quarterX - 1, `only ${Math.round(start.left)}px of room past the left edge`);
+    assert(start.top >= quarterY - 1, `only ${Math.round(start.top)}px of room past the top edge`);
+
+    scroller.scrollLeft = scroller.scrollWidth;
+    scroller.scrollTop = scroller.scrollHeight;
+    const end = gap();
+    assert(end.right >= quarterX - 1, `only ${Math.round(end.right)}px of room past the right edge`);
+    assert(end.bottom >= quarterY - 1, `only ${Math.round(end.bottom)}px of room past the bottom edge`);
+  } finally {
+    viewer.destroy();
+    host.remove();
+  }
+});
+
+test('the viewer can be sent straight to a page by number', async () => {
+  const ws = await loadWorkspace(['report.pdf']);
+  const host = document.createElement('div');
+  host.className = 'viewer';
+  host.style.cssText = 'position:fixed;left:0;top:0;width:800px;height:600px;opacity:0;z-index:9999';
+  document.body.appendChild(host);
+
+  let reported = null;
+  const viewer = new PageViewer(host, ws, { onPageChange: (p) => { reported = p; } });
+  try {
+    await viewer.open(ws.pages[0]);
+    const target = ws.pages[3];
+
+    assert(viewer.goTo(target.id), 'the jump was refused');
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert(viewer.currentPageId === target.id, 'the viewer did not land on the chosen page');
+    assert(reported?.id === target.id, 'the page change was not reported');
+
+    // In a stack the jump scrolls to the page instead of rebuilding it, so the
+    // pages already drawn stay drawn.
+    viewer.setLayout('continuous');
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const before = [...host.querySelectorAll('.viewer__page')].map((f) => f.dataset.id).join();
+    viewer.goTo(ws.pages[1].id);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const after = [...host.querySelectorAll('.viewer__page')].map((f) => f.dataset.id).join();
+    assert(before === after, 'jumping in continuous layout threw the drawn pages away');
+    assert(viewer.currentPageId === ws.pages[1].id, 'the viewer lost track of the page it jumped to');
+
+    assert(!viewer.goTo('no-such-page'), 'a page that does not exist should not be jumped to');
+  } finally {
+    viewer.destroy();
+    host.remove();
+  }
+});
+
 // --------------------------------------------------------------------- runner
 
 export async function run(onResult) {
