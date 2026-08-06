@@ -11,13 +11,16 @@ that point is prepared here.
 ## 1. Build the package
 
 ```bash
-npm run vendor && npm run vendor:ai && npm run package
+npm run vendor && npm run vendor:ai && npm run vendor:ocr && npm run package
 ```
 
-That writes `dist/pdf-toolbox-<version>.zip` (about 5.6 MB with the AI model,
-1.5 MB without). Drop `npm run vendor:ai` if you would rather ship a smaller
-extension without AI upscaling — the fast upscaler still works, and the tool
-explains the option is unavailable.
+That writes `dist/pdf-toolbox-<version>.zip` — about 18 MB with both the AI
+upscaler and the OCR engine, 1.5 MB with neither. Drop either `vendor:` step to
+ship a smaller package: the fast upscaler still works without the AI model, and
+each tool says plainly when its optional part is not installed rather than
+failing at the moment you press the button.
+
+The store's limit is 100 MB, so there is plenty of room either way.
 
 ## 2. Register as a developer, once
 
@@ -45,7 +48,7 @@ PDF Toolbox
 ### Short description (132 characters max)
 
 ```
-Merge, split, compress, convert, crop, sign and edit PDFs in one window. Fully offline — your files never leave your computer.
+Read, edit, merge, split and convert PDFs — and recognise the text in scans. All offline: no upload, no account, no sign-up.
 ```
 
 ### Detailed description
@@ -56,7 +59,20 @@ same document in the same window — no jumping between pages, no re-uploading a
 file for each step.
 
 Everything runs on your own machine. No file is ever uploaded, there is no
-account, and there is no analytics or telemetry of any kind.
+account, and there is no analytics or telemetry of any kind. The extension asks
+for access to no website at all, so it cannot see a single page you visit — and
+that goes for the text recognition too, which most tools can only offer by
+sending your scans to a server.
+
+READ
+• Viewer — where a document opens. Zoom in, drag the page around, and turn pages
+  with the arrows at the sides or with the wheel once the whole sheet is visible.
+  One page at a time or a continuous stack, and it remembers which you prefer.
+• OCR — recognise the text in scanned pages, on your own machine. The words can be
+  selected straight away, and they go into the saved PDF as an invisible layer, so
+  the file still looks exactly as it did but can be selected and searched. Pages
+  that already carry real text are left alone, and a switch shows what was added
+  so you can check the result rather than take it on trust.
 
 ORGANISE
 • Merge — combine PDFs and images, reorder by dragging, or type an exact page number
@@ -99,19 +115,20 @@ dashboard itself may be in another language.
 **Single purpose**
 
 ```
-PDF Toolbox is a single-purpose PDF editing workspace that opens in its own tab.
-Everything it does serves that one purpose: merging, splitting, removing,
-reordering and rotating pages, cropping, compressing, upscaling, adding text,
-stamps and watermarks, changing page backgrounds, converting pages to PNG, JPG
-or CSV, and adding or removing a PDF password. All of it runs locally in the
-tab. The extension has no content scripts, collects no data, and contacts no
-server.
+PDF Toolbox is a single-purpose PDF workspace that opens in its own tab.
+Everything it does serves that one purpose: viewing a PDF, merging, splitting,
+removing, reordering and rotating pages, cropping, compressing, upscaling,
+adding text, stamps and watermarks, changing page backgrounds, recognising the
+text in scanned pages so it can be selected and searched, converting pages to
+PNG, JPG or CSV, and adding or removing a PDF password. All of it runs locally
+in the tab. The extension has no content scripts, collects no data, and contacts
+no server.
 ```
 
-**Remote code: No.** Every library is bundled in the package, and the extension's
-content security policy (`script-src 'self'`) blocks anything else from running.
-Answering "yes" here is both wrong and a guaranteed trip through a much deeper
-review.
+**Remote code: No.** Every library and model file is bundled in the package, and
+the extension's content security policy (`script-src 'self'`) blocks anything
+else from running. Answering "yes" here is both wrong and a guaranteed trip
+through a much deeper review.
 
 **Data collected: none.** Leave every category unticked, then tick all three
 confirmation boxes at the bottom — they are required to submit.
@@ -179,20 +196,57 @@ Nothing else in the extension runs in the sandbox, and everything continues to
 work with the OCR files absent — the tool simply reports that the engine is not
 installed.
 
-### Screenshots
+### Screenshots and promotional tiles
 
-You need at least one, at 1280×800 or 640×400. Good ones to take:
+```bash
+npm run screenshots
+```
 
-1. The page grid with several files merged, at 30% zoom
-2. The Split tool with cut marks visible between pages
-3. The Write tool with a text box selected on a page
-4. The Compress tool showing the four estimated sizes
+That writes everything the listing needs into `store-assets/`, captured from the
+running app with real documents loaded — not mock-ups. Retake them whenever the
+interface changes: a screenshot showing a tool rail the user will not find is
+worse than no screenshot at all.
+
+Upload the seven in this order. The store puts the **first** one on the item's
+card, so it leads with the thing nothing else in this category does offline.
+
+| # | File | Shows |
+| --- | --- | --- |
+| 1 | `screenshot-1-ocr.png` | OCR, with two scanned pages marked amber and three grey ones it can tell already have text |
+| 2 | `screenshot-2-viewer.png` | The viewer: page field, zoom, the arrows at the sides, both page layouts |
+| 3 | `screenshot-3-merge.png` | Three files merged into one grid |
+| 4 | `screenshot-4-split.png` | Cut marks between pages, and the parts they will produce |
+| 5 | `screenshot-5-write.png` | A text box being edited on the page |
+| 6 | `screenshot-6-compress.png` | Four compression levels with measured sizes |
+| 7 | `screenshot-7-copytext.png` | Selecting text straight off the pages |
+
+Both promotional tiles are produced by the same command:
+`promo-small-440x280.png` and `promo-large-1400x560.png`. The small tile is the
+only one the store requires; the large one is needed to be considered for
+featuring.
 
 ## 4. Submit
 
 Review usually takes a few days. The extension asks only for `storage`,
 `unlimitedStorage` and `downloads`, none of which are sensitive, so there is
 nothing here that typically drags a review out.
+
+## Updating a listing that is already live
+
+Same dashboard, *Package* → *Upload new package*, with a higher `version` in
+`manifest.json` than the published one. The listing text and images are not
+carried over from the zip — they are edited separately, and whatever is there
+stays until you change it. So after a release that adds features:
+
+1. Upload the new zip.
+2. Replace the short and detailed description with the copy above.
+3. Delete the old screenshots and upload the current `store-assets/` set. Ones
+   showing an older tool rail are worse than none: they promise a layout that is
+   no longer there.
+4. Replace both promotional tiles.
+
+Each update goes through review again, and the previous version stays live until
+the new one is approved.
 
 ## Until it is published
 

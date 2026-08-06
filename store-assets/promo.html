@@ -93,20 +93,16 @@
     <div class="sheet"><i></i><i></i><i></i><i></i><i></i></div>
     <div class="copy">
       <div class="name">PDF Toolbox</div>
-      <div class="tag">Merge, split, compress, convert, crop and sign PDFs — all in one window, all on your own machine.</div>
+      <div class="tag">Read, edit and recognise PDFs in one window — even the text in a scan. Nothing is uploaded; it all runs on your own machine.</div>
       <div class="chips">
+        <span class="chip">Viewer</span>
         <span class="chip">Merge</span>
         <span class="chip">Split</span>
-        <span class="chip">Compress</span>
-        <span class="chip">Convert</span>
+        <span class="chip">OCR</span>
         <span class="chip">Nothing uploaded</span>
       </div>
     </div>
   </div>
-  <script>
-    const size = new URLSearchParams(location.search).get('size') || 'large';
-    document.body.dataset.size = size;
-    document.documentElement.dataset.demoReady = 'true';
-  </script>
+  <script src="promo.js"></script>
 </body>
 </html>

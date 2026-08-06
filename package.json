@@ -10,6 +10,7 @@
     "vendor:ocr": "node scripts/fetch-ocr.mjs",
     "icons": "node scripts/make-icons.mjs",
     "test-files": "node scripts/make-test-pdfs.mjs",
+    "screenshots": "node scripts/screenshots.mjs",
     "dev": "node scripts/dev-server.mjs",
     "check": "node scripts/check.mjs",
     "package": "node scripts/check.mjs && node scripts/package.mjs",

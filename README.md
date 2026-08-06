@@ -127,7 +127,15 @@ npm run package
 
 Builds `dist/pdf-toolbox-<version>.zip` for the Chrome Web Store — which Brave
 installs from too. **[STORE.md](STORE.md)** has the listing copy, the permission
-justifications reviewers ask for, and the steps. The submission itself needs a
+justifications reviewers ask for, and the steps.
+
+```bash
+npm run screenshots
+```
+
+Retakes the listing images into `store-assets/` — every screenshot is a capture
+of the running app with real documents loaded, so they have to be redone
+whenever the interface changes. The submission itself needs a
 Google account and a one-time \$5 developer fee, so that part is yours to do.
 
 Every upload needs a higher `version` in `manifest.json` than the last one, and

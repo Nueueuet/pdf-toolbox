@@ -15,6 +15,7 @@ import { primeFontMetrics } from './core/fonts.js';
 import { passwordPrompt, modal, confirmDialog } from './ui/modal.js';
 import { toast, progressToast } from './ui/toast.js';
 import { baseName, formatBytes } from './util/format.js';
+import { parseRange } from './util/ranges.js';
 import { IN_EXTENSION } from './core/paths.js';
 import { makeAnnot } from './core/annots.js';
 import { PDFDocument } from '../vendor/pdf-lib.esm.js';
@@ -101,6 +102,7 @@ class App {
       // to rebuild — otherwise OCR finishes and the page still cannot be
       // selected from until something else happens to redraw it.
       if (this.mode === 'grid') this.grid.render();
+      else if (this.mode === 'viewer') this.viewer.rebind(this.currentPage());
       else this.editor.refresh();
     });
     this.ws.on('history', () => this.syncHistoryButtons());
@@ -157,10 +159,20 @@ class App {
     if (files.length === 0) throw new Error('no sample files found — run "npm run test-files"');
     await this.importFiles(files);
 
+    if (params.get('scan')) await this.demoScan(params.get('scan'));
     if (params.get('zoom')) this.setZoom(Number(params.get('zoom')));
     if (params.get('cuts')) this.ws.setCuts(params.get('cuts').split(',').map(Number));
 
     this.selectTool(params.get('demo') || 'merge');
+    if (params.get('grid')) this.showGrid();
+    // Never inherit a remembered layout: a screenshot has to show the same thing
+    // every time it is taken, not whatever was last used on this machine.
+    if (params.get('layout')) this.viewer.setLayout(params.get('layout'));
+    if (params.get('nav')) document.body.classList.add('demo-nav');
+    if (params.get('page')) {
+      const page = this.ws.pages[Number(params.get('page')) - 1];
+      if (page) this.openPage(page);
+    }
 
     if (params.get('annot')) {
       const page = this.currentPage();
@@ -175,6 +187,32 @@ class App {
     }
 
     document.documentElement.dataset.demoReady = 'true';
+  }
+
+  /**
+   * Turns the named pages into scans — flattened to a bitmap, text and all — so
+   * a screenshot of the OCR tool shows what it is actually for: a document that
+   * is part real text and part picture of text.
+   */
+  async demoScan(range) {
+    const targets = this.ws.pagesByNumbers(parseRange(range, this.ws.pageCount).pages);
+    if (targets.length === 0) return;
+
+    const before = this.ws.pageCount;
+    await this.ws.addBytes(
+      await buildPdf(this.ws, targets, { forceRaster: true, rasterDpi: 150 }),
+      'scan.pdf',
+    );
+    const scans = this.ws.pages.slice(before);
+
+    // Each scan takes the place of the page it was made from. They are all at
+    // the end, so lifting one out never disturbs the positions still to come.
+    targets.forEach((page, i) => {
+      const at = this.ws.indexOf(page.id);
+      this.ws.pages.splice(this.ws.indexOf(scans[i].id), 1);
+      this.ws.pages.splice(at, 1, scans[i]);
+    });
+    this.ws.emit('pages');
   }
 
   // ------------------------------------------------------------------ chrome

@@ -875,6 +875,11 @@ button { font: inherit; }
 /* The paging arrows live here too, and stay put while the page moves. */
 .viewer { position: relative; }
 .viewer:hover .editor__nav { opacity: .85; }
+/*
+ * A screenshot has no pointer to hover with, so the arrows are shown outright —
+ * and with no transition, so the capture never lands mid-fade.
+ */
+.demo-nav .editor__nav { opacity: .85; transition: none; }
 
 .viewer__page {
   position: relative;
