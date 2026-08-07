@@ -21,7 +21,7 @@ import { PageViewer } from '../app/ui/pageviewer.js';
 import { analysePage } from '../app/core/coverage.js';
 import { ocrAvailable, ocrPage } from '../app/core/ocr.js';
 import { ocrLines } from '../app/ui/ocrlayer.js';
-import { targetOf, nameFromUrl, supported } from '../app/core/intercept.js';
+import { targetOf, nameFromUrl, supported, turnOn, turnOff, reconcile, diagnose } from '../app/core/intercept.js';
 import { PDFDocument, StandardFonts } from '../vendor/pdf-lib.esm.js';
 import * as pdfjsLib from '../vendor/pdf.mjs';
 
@@ -971,6 +971,81 @@ test('a fetched document is named after the address it came from', async () => {
   for (const [url, expected] of cases) {
     const got = nameFromUrl(url);
     assert(got === expected, `from "${url}" expected "${expected}", got "${got}"`);
+  }
+});
+
+test('the setting is already on before the permission is granted', async () => {
+  /*
+   * Granting fires permissions.onAdded, and the background worker answers it by
+   * reconciling the rule against this stored setting — on its own schedule, in a
+   * worker that may have to start up first. Whatever order those land in, the
+   * setting has to read "on" by the time the grant happens, or a reconcile that
+   * arrives late tears down the rule that was just installed.
+   *
+   * Asserting the order directly rather than trying to stage the race: the race
+   * is by nature timing-dependent, and a test that only sometimes reproduces it
+   * is worth less than one that pins the invariant which prevents it.
+   */
+  const store = new Map();
+  const events = [];
+  let settingAtGrant = 'never asked';
+  let granted = false;
+  let rules = [];
+
+  const chromeStub = {
+    runtime: { id: 'test', getURL: (p) => `chrome-extension://test/${p}` },
+    storage: {
+      local: {
+        get: async (key) => ({ [key]: store.get(key) }),
+        set: async (patch) => { for (const [k, v] of Object.entries(patch)) store.set(k, v); },
+      },
+    },
+    permissions: {
+      contains: async () => granted,
+      request: async () => {
+        // What a reconcile triggered by this grant would see.
+        settingAtGrant = store.get('pdf-toolbox:intercept-pdfs');
+        granted = true;
+        events.push('reconcile');
+        await reconcile();
+        return true;
+      },
+      remove: async () => { granted = false; return true; },
+    },
+    declarativeNetRequest: {
+      updateDynamicRules: async ({ removeRuleIds = [], addRules = [] }) => {
+        rules = rules.filter((r) => !removeRuleIds.includes(r.id)).concat(addRules);
+      },
+      getDynamicRules: async () => rules,
+    },
+    extension: { isAllowedFileSchemeAccess: async () => false },
+  };
+
+  const real = globalThis.chrome;
+  globalThis.chrome = chromeStub;
+  try {
+    const result = await turnOn();
+    assert(result.ok, `turning it on failed: ${result.reason ?? ''} ${result.error ?? ''}`);
+    assert(events.includes('reconcile'), 'the test did not actually exercise the reconcile');
+    assert(settingAtGrant === true,
+      `the setting read "${settingAtGrant}" when the permission was granted; a reconcile `
+      + 'arriving at that moment would have removed the rule');
+
+    const state = await diagnose();
+    assert(state.ruleInstalled, 'no rule was installed');
+
+    // And the redirect has to point at something the manifest makes reachable.
+    const [rule] = await chromeStub.declarativeNetRequest.getDynamicRules();
+    assert(rule.action.redirect.regexSubstitution.includes('app/index.html'),
+      'the rule does not redirect to the workspace');
+    assert(/\\0$/.test(rule.action.redirect.regexSubstitution),
+      'the original address is not carried through to the workspace');
+
+    // Switching off has to take the rule with it, not just the setting.
+    await turnOff();
+    assert((await diagnose()).ruleInstalled === false, 'the rule outlived being switched off');
+  } finally {
+    globalThis.chrome = real;
   }
 });
 

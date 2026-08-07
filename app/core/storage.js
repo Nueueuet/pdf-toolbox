@@ -1,10 +1,14 @@
 /** Persisted settings and saved stamps. Falls back to localStorage off-extension. */
-import { IN_EXTENSION } from './paths.js';
 
 const PREFIX = 'pdf-toolbox:';
 
+/** Asked each call, not settled at import, so it follows the page it runs in. */
+function inExtension() {
+  return typeof chrome !== 'undefined' && Boolean(chrome.runtime?.id);
+}
+
 export async function get(key, fallback = null) {
-  if (IN_EXTENSION && chrome.storage?.local) {
+  if (inExtension() && chrome.storage?.local) {
     const result = await chrome.storage.local.get(PREFIX + key);
     return result[PREFIX + key] ?? fallback;
   }
@@ -17,7 +21,7 @@ export async function get(key, fallback = null) {
 }
 
 export async function set(key, value) {
-  if (IN_EXTENSION && chrome.storage?.local) {
+  if (inExtension() && chrome.storage?.local) {
     await chrome.storage.local.set({ [PREFIX + key]: value });
     return;
   }

@@ -101,12 +101,26 @@ async function renderInterception(body) {
             + 'so the extension goes back to seeing nothing.'),
     ),
     // Shown only when it is meant to be working, and only when it is not: a
-    // rejected rule otherwise looks exactly like a feature that does nothing.
+    // missing rule otherwise looks exactly like a feature that does nothing.
     on && !state.ruleInstalled
-      ? h('p.settings__warn',
-        'The browser did not accept the redirect rule, so nothing is being '
-        + 'intercepted. Switching this off and on again is worth a try; if it '
-        + 'persists, it is a browser-side refusal rather than a setting.')
+      ? h('div.settings__warn',
+        h('p.settings__text',
+          h('strong', 'Switched on, but no rule is installed. '),
+          'Nothing is being intercepted.'),
+        state.error
+          ? h('p.settings__text', 'The browser said: ', h('code', state.error))
+          : null,
+        h('button.btn.btn--small', {
+          type: 'button',
+          onclick: async (event) => {
+            event.target.disabled = true;
+            const result = await intercept.repair();
+            toast(result.ok ? 'The rule is in place now.' : `Still refused: ${result.error ?? result.reason}`,
+              { tone: result.ok ? 'success' : 'error', timeout: 8000 });
+            renderInterception(body);
+          },
+        }, 'Put it back'),
+      )
       : null,
     h('details.settings__more',
       h('summary', 'What it will and will not catch'),

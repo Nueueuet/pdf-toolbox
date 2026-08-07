@@ -18,10 +18,10 @@
  * variant only acts on sites the extension has been given access to — which is
  * nothing at all until the switch below is turned on.
  */
-import { IN_EXTENSION } from './paths.js';
 import * as storage from './storage.js';
 
 const SETTING_KEY = 'intercept-pdfs';
+const ERROR_KEY = 'intercept-error';
 const RULE_ID = 1;
 
 /** Sites the redirect may act on. `file://` is not here — see fileAccess(). */
@@ -42,10 +42,15 @@ export function targetOf(search = location.search) {
   return at === -1 ? null : search.slice(at + OPEN_PARAM.length);
 }
 
-/** Whether this browser can do it at all — false on the dev server. */
+/**
+ * Whether this browser can do it at all — false on the dev server.
+ *
+ * Asked each time rather than settled at import: what is on offer here depends
+ * on the page this runs in, not on when the module happened to load.
+ */
 export function supported() {
-  return IN_EXTENSION
-    && Boolean(chrome.declarativeNetRequest?.updateDynamicRules)
+  if (typeof chrome === 'undefined' || !chrome.runtime?.id) return false;
+  return Boolean(chrome.declarativeNetRequest?.updateDynamicRules)
     && Boolean(chrome.permissions?.request);
 }
 
@@ -68,7 +73,7 @@ export function hasAccess() {
  * the browser's own extensions page, and only the user can set it there.
  */
 export async function fileAccess() {
-  if (!IN_EXTENSION || !chrome.extension?.isAllowedFileSchemeAccess) return false;
+  if (typeof chrome === 'undefined' || !chrome.extension?.isAllowedFileSchemeAccess) return false;
   try {
     return await chrome.extension.isAllowedFileSchemeAccess();
   } catch {
@@ -108,11 +113,32 @@ function rules() {
   }];
 }
 
+/**
+ * @returns {Promise<string|null>} the browser's complaint, or null if it took it.
+ *
+ * The error is handed back rather than thrown because the one thing worse than a
+ * refused rule is a refused rule nobody hears about: the symptom is that PDFs
+ * carry on opening in the browser's own viewer, which looks exactly like a
+ * feature that was never switched on.
+ */
 async function install() {
-  await chrome.declarativeNetRequest.updateDynamicRules({
-    removeRuleIds: [RULE_ID],
-    addRules: rules(),
-  });
+  try {
+    await chrome.declarativeNetRequest.updateDynamicRules({
+      removeRuleIds: [RULE_ID],
+      addRules: rules(),
+    });
+    await storage.set(ERROR_KEY, null);
+    return null;
+  } catch (err) {
+    const message = err?.message ?? String(err);
+    await storage.set(ERROR_KEY, message);
+    console.error('the browser refused the redirect rule', err);
+    return message;
+  }
+}
+
+export function lastError() {
+  return storage.get(ERROR_KEY, null);
 }
 
 async function uninstall() {
@@ -130,12 +156,35 @@ async function uninstall() {
 export async function turnOn() {
   if (!supported()) return { ok: false, reason: 'unsupported' };
 
-  const granted = await chrome.permissions.request({ origins: ORIGINS });
-  if (!granted) return { ok: false, reason: 'denied' };
-
-  await install();
+  /*
+   * Recorded before asking, not after.
+   *
+   * Granting fires permissions.onAdded, which sends the background worker into
+   * reconcile() — and reconcile() decides what to do by reading this very
+   * setting. Left until afterwards, it would still say "off" at that moment, and
+   * the reconcile would tear down the rule this call is in the middle of
+   * installing. That race is not theoretical: it left the feature switched on
+   * with no rule behind it, every single time.
+   */
   await storage.set(SETTING_KEY, true);
-  return { ok: true };
+
+  const granted = await chrome.permissions.request({ origins: ORIGINS });
+  if (!granted) {
+    await storage.set(SETTING_KEY, false);
+    return { ok: false, reason: 'denied' };
+  }
+
+  const error = await install();
+  return error ? { ok: false, reason: 'refused', error } : { ok: true };
+}
+
+/** Puts the rule back after a failure, without going through the permission again. */
+export async function repair() {
+  if (!supported()) return { ok: false, reason: 'unsupported' };
+  if (!await hasAccess()) return { ok: false, reason: 'denied' };
+  await storage.set(SETTING_KEY, true);
+  const error = await install();
+  return error ? { ok: false, reason: 'refused', error } : { ok: true };
 }
 
 /** Turns it off and gives the access back. */
@@ -176,10 +225,11 @@ export async function reconcile() {
  */
 export async function diagnose() {
   if (!supported()) return { supported: false };
-  const [installed, access, files] = await Promise.all([
+  const [installed, access, files, error] = await Promise.all([
     chrome.declarativeNetRequest.getDynamicRules(),
     hasAccess(),
     fileAccess(),
+    lastError(),
   ]);
   return {
     supported: true,
@@ -187,6 +237,7 @@ export async function diagnose() {
     ruleCount: installed.length,
     access,
     files,
+    error,
   };
 }
 
