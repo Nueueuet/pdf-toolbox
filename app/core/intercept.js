@@ -211,8 +211,20 @@ export async function turnOff({ keepAccess = false } = {}) {
  */
 export async function reconcile() {
   if (!supported()) return;
-  const wanted = Boolean(await storage.get(SETTING_KEY, false));
-  if (wanted && await hasAccess()) await install();
+  const wanted = Boolean(await storage.get(SETTING_KEY, false)) && await hasAccess();
+
+  /*
+   * Only written when it actually differs.
+   *
+   * This runs on every browser start, and rewriting the rule set makes the
+   * browser re-index it — work done during the busiest moment there is, for no
+   * change at all. Reading first is far cheaper than writing.
+   */
+  const installed = await chrome.declarativeNetRequest.getDynamicRules();
+  const present = installed.some((rule) => rule.id === RULE_ID);
+  if (wanted === present) return;
+
+  if (wanted) await install();
   else await uninstall();
 }
 

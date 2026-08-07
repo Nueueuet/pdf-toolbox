@@ -974,6 +974,31 @@ test('a fetched document is named after the address it came from', async () => {
   }
 });
 
+test('saving a range of pages keeps their text selectable', async () => {
+  // The point of the feature: the same choice a print dialog offers, but what
+  // comes out is the document, not a picture of it.
+  const ws = await loadWorkspace(['report.pdf']);
+  const { pages } = parseRange('2-4', ws.pageCount);
+  const chosen = ws.pagesByNumbers(pages);
+  assert(chosen.length === 3, `expected 3 pages, got ${chosen.length}`);
+
+  const bytes = await buildPdf(ws, chosen, {});
+  const doc = await pdfjsLib.getDocument({ data: bytes.slice() }).promise;
+  assert(doc.numPages === 3, `saved ${doc.numPages} pages instead of 3`);
+
+  // Page 1 of the saved file has to be page 2 of the original, with its text.
+  const text = [];
+  for (let n = 1; n <= doc.numPages; n++) {
+    const content = await (await doc.getPage(n)).getTextContent();
+    text.push(content.items.map((item) => item.str).join(' '));
+  }
+  assert(text[0].includes('page 2'), `first saved page reads "${text[0].slice(0, 60)}"`);
+  assert(text[2].includes('page 4'), `last saved page reads "${text[2].slice(0, 60)}"`);
+  for (const [i, page] of text.entries()) {
+    assert(page.trim().length > 20, `saved page ${i + 1} carries no selectable text`);
+  }
+});
+
 test('the setting is already on before the permission is granted', async () => {
   /*
    * Granting fires permissions.onAdded, and the background worker answers it by

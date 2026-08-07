@@ -17,7 +17,8 @@ import { settingsDialog } from './ui/settings.js';
 import { targetOf, nameFromUrl, turnOff } from './core/intercept.js';
 import { toast, progressToast } from './ui/toast.js';
 import { baseName, formatBytes } from './util/format.js';
-import { parseRange } from './util/ranges.js';
+import { parseRange, formatRange } from './util/ranges.js';
+import { rangeField } from './ui/controls.js';
 import { IN_EXTENSION } from './core/paths.js';
 import { makeAnnot } from './core/annots.js';
 import { PDFDocument } from '../vendor/pdf-lib.esm.js';
@@ -951,21 +952,100 @@ class App {
     }
   }
 
+  /**
+   * Asks which pages to save, then saves them.
+   *
+   * The same choice a print dialog offers, except that what comes out is the
+   * document itself rather than a picture of it: the pages keep their text,
+   * their links and their vector art, exactly as saving everything does.
+   */
   async exportCurrent() {
     if (this.ws.pageCount === 0) return;
+
+    const choice = await this.askWhichPages();
+    if (!choice) return;
+
     const progress = progressToast('Building PDF…');
     try {
-      const bytes = await buildPdf(this.ws, this.ws.pages, {
+      const bytes = await buildPdf(this.ws, choice.pages, {
         ...this.exportOptions(),
         title: this.ws.name,
         onProgress: (fraction, message) => progress.update(fraction, message),
       });
-      await saveFile(bytes, `${baseName(this.ws.name)}.pdf`);
-      progress.done(`Saved — ${formatBytes(bytes.length)}`);
+      await saveFile(bytes, choice.filename);
+      progress.done(`Saved ${choice.pages.length === this.ws.pageCount
+        ? ''
+        : `${choice.pages.length} of ${this.ws.pageCount} pages `}— ${formatBytes(bytes.length)}`);
     } catch (err) {
       console.error(err);
       progress.fail(`Export failed: ${err.message}`);
     }
+  }
+
+  /** @returns {Promise<{pages: object[], filename: string}|null>} null if cancelled. */
+  askWhichPages() {
+    const total = this.ws.pageCount;
+    // What is selected in the grid is almost always what someone means by "these
+    // pages", so the field opens on it rather than making them type it again.
+    const selected = [...this.ws.selection];
+    const start = selected.length > 0 && selected.length < total
+      ? formatRange(selected.map((id) => this.ws.indexOf(id) + 1))
+      : 'all';
+
+    return modal({
+      title: 'Save PDF',
+      width: 440,
+      render: (close) => {
+        const summary = h('p.modal__text.modal__text--muted');
+        const control = rangeField({ value: start });
+
+        const resolve = () => {
+          const { pages, error } = parseRange(control.value, total);
+          control.setError(error);
+          if (error) {
+            summary.textContent = '';
+            return null;
+          }
+          summary.textContent = pages.length === total
+            ? `The whole document — ${total} ${total === 1 ? 'page' : 'pages'}.`
+            : `${pages.length} of ${total} pages: ${formatRange(pages)}.`;
+          return this.ws.pagesByNumbers(pages);
+        };
+
+        const submit = () => {
+          const pages = resolve();
+          if (!pages || pages.length === 0) return;
+          const name = baseName(this.ws.name);
+          close({
+            pages,
+            filename: pages.length === total
+              ? `${name}.pdf`
+              : `${name} pages ${formatRange(pages.map((p) => this.ws.indexOf(p.id) + 1))}.pdf`,
+          });
+        };
+
+        control.addEventListener('input', resolve);
+        control.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter') submit();
+        });
+        resolve();
+
+        return h('div',
+          h('label.field',
+            h('span.field__label', 'Pages'),
+            control,
+            h('span.field__help', 'Type “all” for the whole document, or a range: 1-10 · 1,4,10 · odd · last'),
+          ),
+          summary,
+          h('p.modal__text', 'Saved pages keep their text, so it can still be selected and searched — '
+            + 'this is not a picture of the page.'),
+          h('div.modal__actions',
+            h('button.btn', { type: 'button', onclick: () => close(null) }, 'Cancel'),
+            h('button.btn.btn--primary', { type: 'button', onclick: submit }, 'Save'),
+          ),
+        );
+      },
+    });
   }
 }
 

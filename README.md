@@ -90,6 +90,11 @@ npm run vendor:ocr
 Page ranges are accepted anywhere you see a page field: `all`, `1-10`,
 `1,4,10`, `1`, and also `odd`, `even`, `last` and open ranges like `5-`.
 
+**Save PDF** asks which pages, the way a print dialog does — except that what
+comes out is the document rather than a picture of it, so the text stays
+selectable and searchable. It opens on whatever is selected in the grid, or
+`all`. A subset is named `<name> pages 2-4.pdf`.
+
 ## Opening PDFs from the web
 
 **Off by default.** The gear in the top right has a switch: *Open PDFs in PDF
