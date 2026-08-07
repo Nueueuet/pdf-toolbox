@@ -21,6 +21,7 @@ import { PageViewer } from '../app/ui/pageviewer.js';
 import { analysePage } from '../app/core/coverage.js';
 import { ocrAvailable, ocrPage } from '../app/core/ocr.js';
 import { ocrLines } from '../app/ui/ocrlayer.js';
+import { targetOf, nameFromUrl, supported } from '../app/core/intercept.js';
 import { PDFDocument, StandardFonts } from '../vendor/pdf-lib.esm.js';
 import * as pdfjsLib from '../vendor/pdf.mjs';
 
@@ -935,6 +936,48 @@ test('the viewer can be sent straight to a page by number', async () => {
     viewer.destroy();
     host.remove();
   }
+});
+
+test('a handed-over PDF address survives its own query string', async () => {
+  // The reason this is not read with URLSearchParams: everything after `open=`
+  // is the original address, and a PDF address carrying its own parameters would
+  // be cut at the first `&` by anything that treats it as one field among many.
+  const cases = [
+    ['?open=https://example.com/a.pdf', 'https://example.com/a.pdf'],
+    ['?open=https://example.com/a.pdf?token=abc&page=2', 'https://example.com/a.pdf?token=abc&page=2'],
+    ['?open=https://example.com/one%20two.pdf', 'https://example.com/one%20two.pdf'],
+    ['?open=file:///C:/reports/q1.pdf', 'file:///C:/reports/q1.pdf'],
+  ];
+  for (const [search, expected] of cases) {
+    const got = targetOf(search);
+    assert(got === expected, `from "${search}" expected "${expected}", got "${got}"`);
+  }
+
+  assert(targetOf('') === null, 'an empty query should hand over nothing');
+  assert(targetOf('?demo=merge') === null, 'an unrelated query should hand over nothing');
+});
+
+test('a fetched document is named after the address it came from', async () => {
+  const cases = [
+    ['https://example.com/annual-report.pdf', 'annual-report.pdf'],
+    ['https://example.com/annual-report.pdf?token=abc', 'annual-report.pdf'],
+    ['https://example.com/files/Q1%20results.pdf', 'Q1 results.pdf'],
+    // Served as a PDF from an address that does not say so — still gets a name
+    // that says what it is, because that name ends up on the saved file.
+    ['https://example.com/download/8821', '8821.pdf'],
+    ['https://example.com/', 'document.pdf'],
+    ['not a url at all', 'document.pdf'],
+  ];
+  for (const [url, expected] of cases) {
+    const got = nameFromUrl(url);
+    assert(got === expected, `from "${url}" expected "${expected}", got "${got}"`);
+  }
+});
+
+test('intercepting stays switched off outside the extension', async () => {
+  // The whole feature hinges on it being inert until asked for. On a plain page
+  // there is no chrome.* to ask, and it has to say so rather than throw.
+  assert(supported() === false, 'interception should report itself unavailable off-extension');
 });
 
 // --------------------------------------------------------------------- runner

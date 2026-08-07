@@ -90,6 +90,37 @@ npm run vendor:ocr
 Page ranges are accepted anywhere you see a page field: `all`, `1-10`,
 `1,4,10`, `1`, and also `odd`, `even`, `last` and open ranges like `5-`.
 
+## Opening PDFs from the web
+
+**Off by default.** The gear in the top right has a switch: *Open PDFs in PDF
+Toolbox*. With it on, clicking a PDF link takes the file straight into the
+workspace instead of the browser's viewer.
+
+It is the only thing here that needs access to websites, so it asks for that
+access at the moment you turn it on, and hands it back when you turn it off —
+not just the redirect, the access itself. Until then the extension can see
+nothing, which is the point.
+
+How it works: a `declarativeNetRequest` rule redirects a navigation to a `.pdf`
+address to the workspace, before the request is sent. The browser therefore
+never receives a PDF and its own viewer never comes into it.
+
+Two consequences worth knowing:
+
+- **It goes by the address, not the content type.** A redirect has to happen
+  before there is a response to inspect, so a PDF served from an address that
+  does not end in `.pdf` opens in the browser's viewer as before.
+- **Local files need one more switch.** `file://` access is granted by *Allow
+  access to file URLs* on the extension's own entry in `chrome://extensions`,
+  which only you can set. The settings dialog says whether it is on.
+
+`declarativeNetRequestWithHostAccess` is used rather than plain
+`declarativeNetRequest`: the plain one cannot be an optional permission, so it
+would have to be granted by everyone at install time, and it carries the
+"Block content on any page" warning. The host-access variant carries no warning
+at all and can only act on sites the extension has been given — which is nothing
+until the switch is turned on.
+
 ## What it will not do
 
 These are limits worth knowing before you rely on the tool, not bugs:

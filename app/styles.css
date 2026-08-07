@@ -1586,6 +1586,78 @@ button { font: inherit; }
 .modal__body { padding: 0 18px 18px; }
 .modal__text { margin: 0 0 14px; line-height: 1.55; color: var(--ink-soft); }
 .modal__actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.modal__text--muted {
+  font-size: 12.5px;
+  color: var(--ink-faint);
+  word-break: break-all;
+}
+
+/* ---------------------------------------------------------------- settings */
+
+.topbar__settings { margin-left: auto; }
+/* With a document open the title bar already pushes everything right. */
+.topbar__doc:not([hidden]) ~ .topbar__settings { margin-left: 0; }
+
+.settings__section { display: flex; flex-direction: column; gap: 14px; }
+.settings__row { display: flex; align-items: flex-start; gap: 12px; }
+.settings__copy { min-width: 0; }
+.settings__title { margin: 0 0 4px; font-size: 14.5px; font-weight: 650; }
+.settings__title label { cursor: pointer; }
+.settings__text { margin: 0 0 8px; font-size: 13px; line-height: 1.55; color: var(--ink-soft); }
+.settings__text:last-child { margin-bottom: 0; }
+
+.settings__note {
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--line-soft);
+}
+
+.settings__more { font-size: 13px; color: var(--ink-soft); }
+.settings__more summary { cursor: pointer; font-weight: 600; color: var(--ink); }
+.settings__list { margin: 10px 0 0; padding-left: 18px; line-height: 1.55; }
+.settings__list li { margin-bottom: 8px; }
+.settings__list code {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--line-soft);
+  font-size: 12px;
+}
+
+/* A switch rather than a tick box: this one turns a capability on, not a
+   preference, and should look like it does something the moment it moves. */
+.switch { position: relative; flex: none; display: block; cursor: pointer; }
+.switch input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.switch__track {
+  display: block;
+  width: 40px;
+  height: 23px;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--line);
+  transition: background .15s;
+}
+
+.switch__knob {
+  display: block;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(15, 30, 55, .3);
+  transition: transform .15s;
+}
+
+.switch input:checked + .switch__track { background: var(--blue); }
+.switch input:checked + .switch__track .switch__knob { transform: translateX(17px); }
+.switch input:disabled + .switch__track { opacity: .55; }
+.switch input:focus-visible + .switch__track { outline: 2px solid var(--blue); outline-offset: 2px; }
 
 /* ------------------------------------------------------------------ toasts */
 

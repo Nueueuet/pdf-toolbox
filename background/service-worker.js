@@ -4,6 +4,8 @@
  * there is one, otherwise it opens a fresh tab.
  */
 
+import { reconcile } from '../app/core/intercept.js';
+
 const APP_URL = chrome.runtime.getURL('app/index.html');
 
 async function openWorkspace() {
@@ -23,5 +25,17 @@ chrome.action.onClicked.addListener(() => {
 
 chrome.runtime.onInstalled.addListener(({ reason }) => {
   if (reason === 'install') openWorkspace();
+  reconcile();
 });
+
+/*
+ * The redirect rule survives a restart, but the site access behind it does not
+ * have to: it can be taken away from the browser's own extensions page at any
+ * time. Checking on every startup, and whenever permissions change, keeps the
+ * two from drifting apart — a rule left behind without access would send a PDF
+ * to a workspace that then cannot fetch it.
+ */
+chrome.runtime.onStartup.addListener(() => reconcile());
+chrome.permissions.onAdded.addListener(() => reconcile());
+chrome.permissions.onRemoved.addListener(() => reconcile());
 

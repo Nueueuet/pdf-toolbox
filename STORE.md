@@ -59,10 +59,14 @@ same document in the same window — no jumping between pages, no re-uploading a
 file for each step.
 
 Everything runs on your own machine. No file is ever uploaded, there is no
-account, and there is no analytics or telemetry of any kind. The extension asks
-for access to no website at all, so it cannot see a single page you visit — and
-that goes for the text recognition too, which most tools can only offer by
-sending your scans to a server.
+account, and there is no analytics or telemetry of any kind — and that goes for
+the text recognition too, which most tools can only offer by sending your scans
+to a server.
+
+It installs with access to no website at all, and every tool works that way. The
+one exception is a switch in the settings, off until you turn it on, that lets
+PDF links open here instead of in the browser's viewer; that asks for site access
+when you switch it on and gives it back when you switch it off.
 
 READ
 • Viewer — where a document opens. Zoom in, drag the page around, and turn pages
@@ -123,6 +127,12 @@ text in scanned pages so it can be selected and searched, converting pages to
 PNG, JPG or CSV, and adding or removing a PDF password. All of it runs locally
 in the tab. The extension has no content scripts, collects no data, and contacts
 no server.
+
+One optional feature, off until the user switches it on in the extension's
+settings, lets a PDF link open in that same workspace instead of the browser's
+built-in viewer. It serves the same single purpose — editing PDFs — by removing
+the download-then-reopen step. It requests site access at the moment it is
+switched on and releases that access when it is switched off.
 ```
 
 **Remote code: No.** Every library and model file is bundled in the package, and
@@ -169,8 +179,36 @@ only to write these results to the user's own download folder under a meaningful
 filename. Nothing is downloaded from the internet.
 ```
 
-That is the complete list. The extension requests **no host permissions at all**,
-which is worth pointing out in the listing: it cannot see any website you visit.
+`declarativeNetRequestWithHostAccess`
+
+```
+Used only by an optional feature the user switches on themselves: opening PDFs
+from the web in the extension's own workspace instead of the browser's viewer.
+It installs one redirect rule, which sends a navigation to a .pdf address to the
+extension's page so the file can be opened for editing. No rule blocks or alters
+any other request, and the rule is removed the moment the feature is switched
+off. The host-access variant is used deliberately: it can act only on sites the
+user has granted access to, and no access is requested until they turn the
+feature on.
+```
+
+`optional_host_permissions: http://*/*, https://*/*`
+
+```
+Requested at runtime, only when the user turns on "Open PDFs in PDF Toolbox",
+and only to fetch the PDF the browser was about to display. Nothing is read from
+any other page, there are no content scripts, and the fetched file is opened
+locally like any other document — it is not transmitted anywhere. Turning the
+feature off calls permissions.remove(), so the access is handed back rather than
+merely going unused.
+```
+
+**On host permissions.** The extension asks for **no host access at install
+time** and works fully without any: every tool operates on files the user hands
+it. Site access is requested at runtime by one optional feature and given back
+when that feature is switched off. That is worth saying in the listing, because
+it is unusual and it is the honest version of "your files never leave your
+computer".
 
 ### The sandbox, if a reviewer asks
 

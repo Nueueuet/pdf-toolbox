@@ -13,6 +13,8 @@ import { buildPdf } from './core/export.js';
 import { saveFile } from './core/download.js';
 import { primeFontMetrics } from './core/fonts.js';
 import { passwordPrompt, modal, confirmDialog } from './ui/modal.js';
+import { settingsDialog } from './ui/settings.js';
+import { targetOf, nameFromUrl, turnOff } from './core/intercept.js';
 import { toast, progressToast } from './ui/toast.js';
 import { baseName, formatBytes } from './util/format.js';
 import { parseRange } from './util/ranges.js';
@@ -129,6 +131,62 @@ class App {
     if (!IN_EXTENSION && location.search.includes('demo=')) {
       this.runDemo().catch((err) => console.error('demo setup failed', err));
     }
+
+    // Arrived here because a PDF on the web was redirected to us.
+    const handed = targetOf();
+    if (handed) this.openFromWeb(handed);
+  }
+
+  /**
+   * Fetches a PDF the browser was about to open and puts it in the workspace.
+   *
+   * The address is left in the tab's own bar untouched — going back has to lead
+   * to where the reader came from, not to an empty workspace.
+   */
+  async openFromWeb(url) {
+    const progress = progressToast('Fetching the document…');
+    try {
+      // Same credentials the browser would have used, so a PDF behind a login
+      // arrives rather than turning into a page of HTML saying "please sign in".
+      const response = await fetch(url, { credentials: 'include' });
+      if (!response.ok) throw new Error(`the server answered ${response.status}`);
+
+      const blob = await response.blob();
+      progress.done(null);
+      await this.importFiles([new File([blob], nameFromUrl(url), { type: 'application/pdf' })]);
+    } catch (err) {
+      console.error('could not open the redirected document', err);
+      progress.fail(`Could not fetch that PDF: ${err.message}`);
+      // Better a viewer that works than one that insists.
+      this.offerBrowserViewer(url);
+    }
+  }
+
+  offerBrowserViewer(url) {
+    modal({
+      title: 'That PDF could not be fetched',
+      width: 460,
+      render: (close) => h('div',
+        h('p.modal__text',
+          'PDF Toolbox was given this document to open but could not download it. '
+          + 'That usually means the site needs a sign-in the extension does not carry, '
+          + 'or the file is a local one and file access is switched off.'),
+        h('p.modal__text.modal__text--muted', url),
+        h('div.modal__actions',
+          h('button.btn', { type: 'button', onclick: () => close() }, 'Stay here'),
+          h('button.btn.btn--primary', {
+            type: 'button',
+            // Reloading the address as it stands would only be redirected back
+            // here, so the redirect has to go before the browser can have it.
+            onclick: async () => {
+              close();
+              await turnOff();
+              window.location.href = url;
+            },
+          }, 'Switch this off and open it'),
+        ),
+      ),
+    });
   }
 
   /** Loads sample documents and puts the app into a given state, for screenshots. */
@@ -271,6 +329,7 @@ class App {
       });
     }
 
+    $('#settingsBtn').addEventListener('click', () => settingsDialog());
     $('#backToGrid').addEventListener('click', () => this.showGrid());
     $('#viewerToGrid').addEventListener('click', () => this.showGrid());
     const pageInput = $('#viewerPageInput');
