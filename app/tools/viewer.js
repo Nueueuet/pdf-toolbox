@@ -14,7 +14,7 @@ import * as storage from '../core/storage.js';
 const SETTINGS_KEY = 'viewer';
 
 /** Reading arrangement a fresh install starts in. */
-export const DEFAULT_LAYOUT = 'single';
+export const DEFAULT_LAYOUT = 'continuous';
 
 export async function loadViewerSettings() {
   const saved = await storage.get(SETTINGS_KEY, {});
@@ -41,18 +41,19 @@ const viewer = {
 
     const layout = radioCards({
       value: view.layout,
+      // The default comes first, so the list reads in the order it is met.
       options: [
-        {
-          value: 'single',
-          label: 'Single page',
-          description: 'One page fills the window. The arrows at the sides turn to the next, '
-            + 'and so does the wheel once the whole sheet is visible.',
-        },
         {
           value: 'continuous',
           label: 'Continuous',
           description: 'Pages stacked below one another; scrolling runs straight across the '
             + 'join, showing the foot of one page and the head of the next.',
+        },
+        {
+          value: 'single',
+          label: 'Single page',
+          description: 'One page fills the window. The arrows at the sides turn to the next, '
+            + 'and so does the wheel once the whole sheet is visible.',
         },
       ],
       onchange: (value) => {

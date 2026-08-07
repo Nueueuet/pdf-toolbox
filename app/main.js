@@ -8,7 +8,7 @@ import { PageGrid } from './ui/pagegrid.js';
 import { PageEditor } from './ui/pageeditor.js';
 import { TOOLS, GROUPS, DEFAULT_TOOL } from './tools/index.js';
 import { PageViewer } from './ui/pageviewer.js';
-import { loadViewerSettings, saveViewerSettings } from './tools/viewer.js';
+import { loadViewerSettings, saveViewerSettings, DEFAULT_LAYOUT } from './tools/viewer.js';
 import { buildPdf } from './core/export.js';
 import { saveFile } from './core/download.js';
 import { primeFontMetrics } from './core/fonts.js';
@@ -117,12 +117,20 @@ class App {
     this.onPagesChanged();
     primeFontMetrics().catch((err) => console.error('font metrics failed', err));
 
+    // Until the saved choice has been read, show the default rather than
+    // whatever the viewer class happens to start in — otherwise the first render
+    // is in an arrangement nobody asked for, and is thrown away a moment later.
+    this.viewer.layout = DEFAULT_LAYOUT;
+
     // A reading layout is a habit, not a per-document choice, so it is restored
     // before the first document is even open.
     loadViewerSettings().then((settings) => {
       this.viewer.layout = settings.layout;
       this.viewer.zoom = settings.zoom;
       if (this.mode === 'viewer') this.viewer.render();
+      // The panel was built from the default while this was still being read, so
+      // it would otherwise sit there showing an arrangement the viewer is not in.
+      if (this.activeToolId === 'viewer') this.selectTool('viewer');
     });
 
     // Dev-server only. `scripts/screenshots.mjs` uses this to capture the real
@@ -222,11 +230,13 @@ class App {
     if (params.get('zoom')) this.setZoom(Number(params.get('zoom')));
     if (params.get('cuts')) this.ws.setCuts(params.get('cuts').split(',').map(Number));
 
+    // Never inherit a remembered layout: a screenshot has to show the same thing
+    // every time it is taken, not whatever was last used on this machine. Set
+    // before the panel is built, so the panel agrees with the surface.
+    if (params.get('layout')) this.viewer.setLayout(params.get('layout'));
+
     this.selectTool(params.get('demo') || 'merge');
     if (params.get('grid')) this.showGrid();
-    // Never inherit a remembered layout: a screenshot has to show the same thing
-    // every time it is taken, not whatever was last used on this machine.
-    if (params.get('layout')) this.viewer.setLayout(params.get('layout'));
     if (params.get('nav')) document.body.classList.add('demo-nav');
     if (params.get('page')) {
       const page = this.ws.pages[Number(params.get('page')) - 1];

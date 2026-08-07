@@ -45,7 +45,7 @@ npm run vendor:ocr
 
 | Tool | What it does |
 | --- | --- |
-| Viewer | Where a document opens. Zoom with the buttons, `+`/`−` or Ctrl and the wheel; move the page with the wheel, Shift and the wheel for sideways, a tilt wheel, or by holding the middle mouse button and dragging. Two arrangements, remembered between sessions: **single page**, turned with the arrows at the sides of the view or the wheel once the whole sheet fits, and **continuous**, where scrolling runs straight across the join. Text stays selectable throughout. |
+| Viewer | Where a document opens. Zoom with the buttons, `+`/`−` or Ctrl and the wheel; move the page with the wheel, Shift and the wheel for sideways, a tilt wheel, or by holding the middle mouse button and dragging. Two arrangements, remembered between sessions: **continuous**, the default, where scrolling runs straight across the join, and **single page**, turned with the arrows at the sides of the view or the wheel once the whole sheet fits. Text stays selectable throughout. |
 
 **Organise**
 
