@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "PDF Toolbox",
-  "version": "0.9.5",
+  "version": "0.9.6",
   "description": "Merge, split, compress, convert, sign and edit PDF files — entirely on your own machine.",
   "minimum_chrome_version": "116",
 
@@ -31,11 +31,18 @@
     "declarativeNetRequestWithHostAccess"
   ],
 
-  "optional_host_permissions": ["http://*/*", "https://*/*"],
+  "optional_host_permissions": ["http://*/*", "https://*/*", "file:///*"],
 
   "sandbox": {
     "pages": ["sandbox/ocr-sandbox.html"]
   },
+
+  "web_accessible_resources": [
+    {
+      "resources": ["app/index.html"],
+      "matches": ["<all_urls>"]
+    }
+  ],
 
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'",

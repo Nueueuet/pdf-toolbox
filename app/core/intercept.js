@@ -76,9 +76,24 @@ export async function fileAccess() {
   }
 }
 
-function rules(allowFiles) {
+/**
+ * The one rule.
+ *
+ * The redirect target has to be listed in the manifest's
+ * `web_accessible_resources`, or the redirect fails and the browser opens the
+ * PDF itself as though no rule existed — silently, which is a miserable thing to
+ * debug.
+ *
+ * `file://` is always in the pattern rather than only when file access happens
+ * to be granted. Whether that access exists is decided by a switch on the
+ * browser's own extensions page, which this code is never told about, so a rule
+ * built around what was true at the time would go stale the moment the switch
+ * moved. A rule covering an address the extension has no access to simply does
+ * not act, which is exactly the wanted behaviour anyway.
+ */
+function rules() {
   const target = `${chrome.runtime.getURL('app/index.html')}?${OPEN_PARAM}\\0`;
-  const rule = {
+  return [{
     id: RULE_ID,
     priority: 1,
     action: { type: 'redirect', redirect: { regexSubstitution: target } },
@@ -86,20 +101,17 @@ function rules(allowFiles) {
       // Address-based, because a redirect happens before there is a response to
       // read a content type from. A PDF served from an address that does not say
       // ".pdf" therefore goes to the browser's viewer as before.
-      regexFilter: allowFiles
-        ? '^(https?|file)://.*\\.pdf($|\\?)'
-        : '^https?://.*\\.pdf($|\\?)',
+      regexFilter: '^(https?|file)://.*\\.pdf($|\\?)',
       resourceTypes: ['main_frame'],
       isUrlFilterCaseSensitive: false,
     },
-  };
-  return [rule];
+  }];
 }
 
 async function install() {
   await chrome.declarativeNetRequest.updateDynamicRules({
     removeRuleIds: [RULE_ID],
-    addRules: rules(await fileAccess()),
+    addRules: rules(),
   });
 }
 
@@ -153,6 +165,29 @@ export async function reconcile() {
   const wanted = Boolean(await storage.get(SETTING_KEY, false));
   if (wanted && await hasAccess()) await install();
   else await uninstall();
+}
+
+/**
+ * What the browser actually has installed, for the settings dialog to show.
+ *
+ * Worth surfacing rather than assuming: a rule can be rejected — a redirect
+ * target that is not web accessible is the classic way — and the only sign of it
+ * otherwise is that PDFs quietly keep opening in the browser's own viewer.
+ */
+export async function diagnose() {
+  if (!supported()) return { supported: false };
+  const [installed, access, files] = await Promise.all([
+    chrome.declarativeNetRequest.getDynamicRules(),
+    hasAccess(),
+    fileAccess(),
+  ]);
+  return {
+    supported: true,
+    ruleInstalled: installed.some((rule) => rule.id === RULE_ID),
+    ruleCount: installed.length,
+    access,
+    files,
+  };
 }
 
 /** A sensible file name for a document fetched from an address. */

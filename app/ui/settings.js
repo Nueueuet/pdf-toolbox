@@ -39,7 +39,8 @@ async function renderInterception(body) {
   }
 
   const on = await intercept.isOn();
-  const files = await intercept.fileAccess();
+  const state = await intercept.diagnose();
+  const files = state.files;
 
   const toggle = h('input', {
     type: 'checkbox',
@@ -99,6 +100,14 @@ async function renderInterception(body) {
           : 'Switching it off again takes the access away, not just the redirect, '
             + 'so the extension goes back to seeing nothing.'),
     ),
+    // Shown only when it is meant to be working, and only when it is not: a
+    // rejected rule otherwise looks exactly like a feature that does nothing.
+    on && !state.ruleInstalled
+      ? h('p.settings__warn',
+        'The browser did not accept the redirect rule, so nothing is being '
+        + 'intercepted. Switching this off and on again is worth a try; if it '
+        + 'persists, it is a browser-side refusal rather than a setting.')
+      : null,
     h('details.settings__more',
       h('summary', 'What it will and will not catch'),
       h('ul.settings__list',
@@ -107,9 +116,16 @@ async function renderInterception(body) {
           + 'content type to go by yet. A PDF served from an address that does '
           + 'not say so opens in the browser’s viewer as before.'),
         h('li', files
-          ? 'Local files are included: this extension is allowed to read file addresses.'
-          : 'Local files are not included yet. To add them, switch on “Allow access to file URLs” '
-            + 'on this extension’s entry in the browser’s extensions page, then turn this off and on again.'),
+          ? h('span',
+            h('strong', 'Local files: access is switched on. '),
+            'Whether the browser actually lets a local PDF be handed over is its own '
+            + 'decision — some builds keep file:// navigations to themselves. If one '
+            + 'still opens in the built-in viewer, that is why, and there is nothing '
+            + 'here that can change it.')
+          : h('span',
+            h('strong', 'Local files are not included. '),
+            'Switch on “Allow access to file URLs” on this extension’s entry in the '
+            + 'browser’s extensions page — only you can set that.')),
         h('li', 'PDFs inside a page — a preview embedded in a web page — are left alone.'),
       ),
     ),

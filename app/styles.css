@@ -1612,6 +1612,17 @@ button { font: inherit; }
   background: var(--line-soft);
 }
 
+.settings__warn {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 9px;
+  border: 1px solid #f3c6a8;
+  background: #fdf3ea;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #8a4b16;
+}
+
 .settings__more { font-size: 13px; color: var(--ink-soft); }
 .settings__more summary { cursor: pointer; font-weight: 600; color: var(--ink); }
 .settings__list { margin: 10px 0 0; padding-left: 18px; line-height: 1.55; }
