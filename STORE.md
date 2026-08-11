@@ -143,7 +143,9 @@ through a much deeper review.
 **Data collected: none.** Leave every category unticked, then tick all three
 confirmation boxes at the bottom — they are required to submit.
 
-**Privacy policy URL**
+**Privacy policy URL** — the policy itself, not the repository front page. A link
+that lands somewhere the reviewer then has to go looking from is a common reason
+to be sent back.
 
 ```
 https://github.com/Nueueuet/pdf-toolbox/blob/main/PRIVACY.md
@@ -194,6 +196,12 @@ feature on.
 
 `optional_host_permissions: http://*/*, https://*/*, file:///*`
 
+The dashboard does **not** ask for this one — it generates a justification field
+per entry in `permissions`, and optional host permissions are not among them.
+Keep the text to hand anyway: it is the first thing a reviewer asks about when
+they do ask, and it belongs in the reply rather than being written from scratch
+under time pressure.
+
 ```
 Requested at runtime, only when the user turns on "Open PDFs in PDF Toolbox",
 and only to fetch the PDF the browser was about to display. Nothing is read from
@@ -210,6 +218,8 @@ is off unless they set it.
 ```
 
 `web_accessible_resources`
+
+No field for this either, and again worth having ready:
 
 ```
 The workspace page (app/index.html) is listed because it is the target of that
@@ -315,7 +325,7 @@ has to be redone, not just checked:
 | *Store listing* → Screenshots | All seven replaced | `store-assets/screenshot-*.png` |
 | *Store listing* → Promo tiles | Both replaced | `store-assets/promo-*.png` |
 | *Privacy* → Single purpose | Now covers the optional feature | [Single purpose](#privacy-practices) |
-| *Privacy* → Permission justifications | **Three new fields appear**: `declarativeNetRequestWithHostAccess`, the optional host permissions, and `web_accessible_resources` | [Permission justifications](#permission-justifications) |
+| *Privacy* → Permission justifications | **One new field appears**: `declarativeNetRequestWithHostAccess`. The dashboard generates a field per entry in `permissions` only — optional host permissions and `web_accessible_resources` get none | [Permission justifications](#permission-justifications) |
 | *Privacy* → Data usage | Still nothing collected — but the three certification boxes have to be ticked again | — |
 
 The privacy policy URL does not change; the document behind it does, and it is
