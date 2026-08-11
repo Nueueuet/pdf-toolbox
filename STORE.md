@@ -192,7 +192,7 @@ user has granted access to, and no access is requested until they turn the
 feature on.
 ```
 
-`optional_host_permissions: http://*/*, https://*/*`
+`optional_host_permissions: http://*/*, https://*/*, file:///*`
 
 ```
 Requested at runtime, only when the user turns on "Open PDFs in PDF Toolbox",
@@ -201,6 +201,21 @@ any other page, there are no content scripts, and the fetched file is opened
 locally like any other document — it is not transmitted anywhere. Turning the
 feature off calls permissions.remove(), so the access is handed back rather than
 merely going unused.
+
+file:///* is listed so the same feature can open a PDF the user opens from
+their own file manager. It cannot be granted by a runtime request at all: file
+access is controlled solely by the "Allow access to file URLs" switch on the
+extension's entry in chrome://extensions, which only the user can set, and it
+is off unless they set it.
+```
+
+`web_accessible_resources`
+
+```
+The workspace page (app/index.html) is listed because it is the target of that
+one redirect rule; a declarativeNetRequest rule may not redirect to a resource
+that is not web accessible. It exposes the editor page itself, which reads no
+page data and has no privileged interface beyond the extension's own APIs.
 ```
 
 **On host permissions.** The extension asks for **no host access at install
@@ -285,6 +300,33 @@ stays until you change it. So after a release that adds features:
 
 Each update goes through review again, and the previous version stays live until
 the new one is approved.
+
+### The release that added PDF interception
+
+This one changes more than the usual update, because it is the first release
+that asks for anything beyond the files the user hands over. Everything below
+has to be redone, not just checked:
+
+| Where | What changed | Source |
+| --- | --- | --- |
+| *Package* | Upload `dist/pdf-toolbox-<version>.zip` | built by `npm run package` |
+| *Store listing* → Description | Now names the viewer, OCR, and the interception switch | [Detailed description](#detailed-description) |
+| *Store listing* → Short description | Rewritten | [Short description](#short-description-132-characters-max) |
+| *Store listing* → Screenshots | All seven replaced | `store-assets/screenshot-*.png` |
+| *Store listing* → Promo tiles | Both replaced | `store-assets/promo-*.png` |
+| *Privacy* → Single purpose | Now covers the optional feature | [Single purpose](#privacy-practices) |
+| *Privacy* → Permission justifications | **Three new fields appear**: `declarativeNetRequestWithHostAccess`, the optional host permissions, and `web_accessible_resources` | [Permission justifications](#permission-justifications) |
+| *Privacy* → Data usage | Still nothing collected — but the three certification boxes have to be ticked again | — |
+
+The privacy policy URL does not change; the document behind it does, and it is
+already published with the repository.
+
+**Expect a slower review than usual.** Host permissions — even optional ones —
+and `<all_urls>` in `web_accessible_resources` are what reviewers look at
+hardest. The single-purpose statement and the justifications above are written
+to answer that before it is asked: nothing is requested at install, the access is
+requested at the moment the user switches the feature on, and it is handed back
+when they switch it off.
 
 ## Until it is published
 
