@@ -6,7 +6,8 @@
  * a PDF editor is a coordinate bug, and the only way to catch those is to write
  * a file, read it back, and compare it against the preview the user was shown.
  */
-import { Workspace } from '../app/core/workspace.js';
+import { Workspace, normalizeQuarter } from '../app/core/workspace.js';
+import { TOOLS } from '../app/tools/index.js';
 import { buildPdf } from '../app/core/export.js';
 import { renderPageCanvas } from '../app/core/render.js';
 import { makeAnnot, applyMark } from '../app/core/annots.js';
@@ -971,6 +972,44 @@ test('a fetched document is named after the address it came from', async () => {
   for (const [url, expected] of cases) {
     const got = nameFromUrl(url);
     assert(got === expected, `from "${url}" expected "${expected}", got "${got}"`);
+  }
+});
+
+test('rotating a page turns it in the viewer, without leaving it', async () => {
+  // Rotate is one of the tools that acts wherever you are. If it ever went back
+  // to being grid-only, opening it while reading would throw you out of the
+  // document — so the declaration is worth pinning down alongside the behaviour.
+  const rotate = TOOLS.find((tool) => tool.id === 'rotate');
+  assert(rotate, 'there is no rotate tool');
+  assert(rotate.mode === 'any',
+    `rotate declares mode "${rotate.mode}"; anything but "any" leaves the viewer`);
+
+  const ws = await loadWorkspace(['mixed-pages.pdf']);
+  const landscape = ws.pages[1];
+  const before = pageSize(landscape);
+  assert(before.w > before.h, 'expected page 2 of the sample to be landscape');
+
+  const host = document.createElement('div');
+  host.className = 'viewer';
+  host.style.cssText = 'position:fixed;left:0;top:0;width:800px;height:600px;opacity:0;z-index:9999';
+  document.body.appendChild(host);
+
+  const viewer = new PageViewer(host, ws, {});
+  try {
+    await viewer.open(landscape);
+    const frame = () => host.querySelector(`.viewer__page[data-id="${landscape.id}"]`);
+    assert(Number(frame().dataset.w) > Number(frame().dataset.h), 'the viewer did not start landscape');
+
+    landscape.rotate = normalizeQuarter(landscape.rotate + 90);
+    await viewer.rebind(landscape);
+
+    const after = pageSize(landscape);
+    assert(after.w === before.h && after.h === before.w, 'the quarter turn did not swap the sides');
+    assert(Number(frame().dataset.w) < Number(frame().dataset.h),
+      'the viewer still shows the page in its old shape');
+  } finally {
+    viewer.destroy();
+    host.remove();
   }
 });
 

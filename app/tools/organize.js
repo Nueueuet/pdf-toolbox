@@ -23,7 +23,7 @@ function pageScope(ctx, { label = 'Pages' } = {}) {
    * default. The field still takes `all` or any range, so a tool opened from the
    * single-page view can still act on the whole document.
    */
-  const current = ctx.app.mode === 'page' ? ctx.currentPage() : null;
+  const current = ctx.app.onSinglePage ? ctx.currentPage() : null;
   const initial = ctx.ws.selection.size
     ? formatRange([...ctx.ws.selection].map((id) => ctx.ws.indexOf(id) + 1))
     : current
@@ -332,7 +332,9 @@ const rotate = {
   id: 'rotate',
   label: 'Rotate',
   group: 'Organise',
-  mode: 'grid',
+  // Works wherever you are: turning a page you are reading is as natural a thing
+  // to want as turning one you picked out of the grid.
+  mode: 'any',
   icon: 'M21 12a9 9 0 1 1-3-6.7 M21 3v6h-6',
   blurb: 'Turn pages a quarter at a time, or to any angle.',
   panel(ctx) {
