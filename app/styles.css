@@ -1632,6 +1632,18 @@ button { font: inherit; }
 
 .btn--small { padding: 4px 10px; font-size: 12.5px; }
 
+.settings__diag {
+  max-height: 220px;
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  overflow: auto;
+  border-radius: 8px;
+  background: var(--line-soft);
+  font: 11.5px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace;
+  white-space: pre;
+  user-select: text;
+}
+
 .settings__more { font-size: 13px; color: var(--ink-soft); }
 .settings__more summary { cursor: pointer; font-weight: 600; color: var(--ink); }
 .settings__list { margin: 10px 0 0; padding-left: 18px; line-height: 1.55; }

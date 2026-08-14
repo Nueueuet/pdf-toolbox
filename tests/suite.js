@@ -1075,6 +1075,7 @@ test('the setting is already on before the permission is granted', async () => {
         return true;
       },
       remove: async () => { granted = false; return true; },
+      getAll: async () => ({ permissions: [], origins: granted ? ['http://*/*', 'https://*/*'] : [] }),
     },
     declarativeNetRequest: {
       updateDynamicRules: async ({ removeRuleIds = [], addRules = [] }) => {

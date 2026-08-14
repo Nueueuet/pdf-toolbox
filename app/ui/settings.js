@@ -8,6 +8,7 @@
  * anything beyond the files you hand it yourself.
  */
 import { h, clear } from '../util/dom.js';
+import { buttonRow } from './controls.js';
 import { modal } from './modal.js';
 import { toast } from './toast.js';
 import * as intercept from '../core/intercept.js';
@@ -50,18 +51,26 @@ async function renderInterception(body) {
       // Straight off the click: the browser refuses a permission request that
       // did not come from something the user just did.
       toggle.disabled = true;
-      if (event.target.checked) {
-        const result = await intercept.turnOn();
-        if (!result.ok) {
-          toast(result.reason === 'denied'
-            ? 'Site access was not granted, so PDFs still open in the browser’s viewer.'
-            : 'This browser cannot do that.', { tone: 'error', timeout: 7000 });
+      try {
+        if (event.target.checked) {
+          const result = await intercept.turnOn();
+          if (result.ok) {
+            toast('PDFs on the web will now open here.', { tone: 'success' });
+          } else if (result.reason === 'denied') {
+            toast('Site access was not granted, so PDFs still open in the browser’s viewer.',
+              { tone: 'error', timeout: 7000 });
+          } else {
+            // Say what the browser said. "It did not work" is not something
+            // anyone can act on, least of all from another machine.
+            toast(result.error ?? 'This browser cannot do that.', { tone: 'error', timeout: 12000 });
+          }
         } else {
-          toast('PDFs on the web will now open here.', { tone: 'success' });
+          await intercept.turnOff();
+          toast('PDFs open in the browser’s viewer again, and site access has been given back.');
         }
-      } else {
-        await intercept.turnOff();
-        toast('PDFs open in the browser’s viewer again, and site access has been given back.');
+      } catch (err) {
+        console.error('switching interception failed', err);
+        toast(err?.message ?? String(err), { tone: 'error', timeout: 12000 });
       }
       renderInterception(body);
     },
@@ -122,6 +131,33 @@ async function renderInterception(body) {
         }, 'Put it back'),
       )
       : null,
+    /*
+     * Always available, not only when something looks wrong.
+     *
+     * Everything that decides whether a PDF gets handed over lives in the
+     * browser rather than in this page, and none of it is visible from the
+     * outside: from here a refused rule, a permission that was never granted and
+     * a rule the browser simply declines to act on all look identical. This is
+     * the only way to tell them apart from another machine.
+     */
+    h('details.settings__more',
+      h('summary', 'Diagnostics'),
+      h('pre.settings__diag', JSON.stringify(state, null, 2)),
+      buttonRow(
+        h('button.btn.btn--small', {
+          type: 'button',
+          onclick: async (event) => {
+            try {
+              await navigator.clipboard.writeText(JSON.stringify(state, null, 2));
+              toast('Diagnostics copied.', { tone: 'success' });
+            } catch {
+              toast('Could not copy — select the text above instead.', { tone: 'error' });
+            }
+            event.target.blur();
+          },
+        }, 'Copy'),
+      ),
+    ),
     h('details.settings__more',
       h('summary', 'What it will and will not catch'),
       h('ul.settings__list',

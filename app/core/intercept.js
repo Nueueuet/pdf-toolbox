@@ -168,7 +168,23 @@ export async function turnOn() {
    */
   await storage.set(SETTING_KEY, true);
 
-  const granted = await chrome.permissions.request({ origins: ORIGINS });
+  /*
+   * Asking can fail outright rather than merely being refused — a manifest whose
+   * optional permissions the browser did not accept is the usual reason, and it
+   * throws instead of answering false. Left uncaught that is a switch which does
+   * nothing at all and says nothing either.
+   */
+  let granted = false;
+  try {
+    granted = await chrome.permissions.request({ origins: ORIGINS });
+  } catch (err) {
+    const message = err?.message ?? String(err);
+    await storage.set(SETTING_KEY, false);
+    await storage.set(ERROR_KEY, message);
+    console.error('the browser refused to ask for site access', err);
+    return { ok: false, reason: 'refused', error: message };
+  }
+
   if (!granted) {
     await storage.set(SETTING_KEY, false);
     return { ok: false, reason: 'denied' };
@@ -237,20 +253,39 @@ export async function reconcile() {
  */
 export async function diagnose() {
   if (!supported()) return { supported: false };
-  const [installed, access, files, error] = await Promise.all([
-    chrome.declarativeNetRequest.getDynamicRules(),
+
+  const [installed, access, files, error, granted] = await Promise.all([
+    chrome.declarativeNetRequest.getDynamicRules().catch((err) => ({ err })),
     hasAccess(),
     fileAccess(),
     lastError(),
+    // Optional chaining, not just a catch: a browser without it throws on the
+    // call itself, and a diagnostic that crashes is worse than a missing line.
+    chrome.permissions.getAll?.().catch(() => null) ?? null,
   ]);
+
+  const rules = Array.isArray(installed) ? installed : [];
   return {
     supported: true,
-    ruleInstalled: installed.some((rule) => rule.id === RULE_ID),
-    ruleCount: installed.length,
+    version: chrome.runtime.getManifest?.().version ?? null,
+    id: chrome.runtime.id,
+    wanted: Boolean(await storage.get(SETTING_KEY, false)),
     access,
     files,
+    grantedOrigins: granted?.origins ?? null,
+    ruleInstalled: rules.some((rule) => rule.id === RULE_ID),
+    ruleCount: rules.length,
+    rule: rules.find((rule) => rule.id === RULE_ID) ?? null,
+    rulesError: installed?.err ? String(installed.err.message ?? installed.err) : null,
     error,
+    target: chrome.runtime.getURL('app/index.html'),
   };
+}
+
+/** The same thing as text, for pasting into a bug report. */
+export async function diagnosticReport() {
+  const state = await diagnose();
+  return JSON.stringify(state, null, 2);
 }
 
 /** A sensible file name for a document fetched from an address. */
