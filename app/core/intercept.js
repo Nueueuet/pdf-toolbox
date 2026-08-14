@@ -24,8 +24,23 @@ const SETTING_KEY = 'intercept-pdfs';
 const ERROR_KEY = 'intercept-error';
 const RULE_ID = 1;
 
-/** Sites the redirect may act on. `file://` is not here — see fileAccess(). */
+/** Sites the redirect may act on. */
 export const ORIGINS = ['http://*/*', 'https://*/*'];
+
+/**
+ * Local files, asked for separately.
+ *
+ * The switch on the browser's extensions page does not grant this — it only
+ * makes it grantable. Without asking as well, the extension holds no access to
+ * `file://` at all, and then neither mechanism can touch a local PDF: a rule
+ * only acts where there is access, and a tab's address stays hidden from an
+ * extension that has none. That is why local files never worked, on any machine,
+ * however the switch was set.
+ *
+ * Asked for on its own so that a refusal costs only local files rather than the
+ * whole feature.
+ */
+export const FILE_ORIGIN = 'file:///*';
 
 /**
  * The address a PDF is handed over on.
@@ -168,6 +183,11 @@ export async function turnOn() {
    */
   await storage.set(SETTING_KEY, true);
 
+  // Local files are worth asking for in the same breath, but only where the
+  // browser could say yes: with its file switch off the request is refused, and
+  // refused together with the web access it was bundled with.
+  const wanted = await fileAccess() ? [...ORIGINS, FILE_ORIGIN] : ORIGINS;
+
   /*
    * Asking can fail outright rather than merely being refused — a manifest whose
    * optional permissions the browser did not accept is the usual reason, and it
@@ -176,7 +196,12 @@ export async function turnOn() {
    */
   let granted = false;
   try {
-    granted = await chrome.permissions.request({ origins: ORIGINS });
+    granted = await chrome.permissions.request({ origins: wanted });
+    // Bundled with file access and turned down: the web half is worth having on
+    // its own, so ask again without it rather than leaving with nothing.
+    if (!granted && wanted.length > ORIGINS.length) {
+      granted = await chrome.permissions.request({ origins: ORIGINS });
+    }
   } catch (err) {
     const message = err?.message ?? String(err);
     await storage.set(SETTING_KEY, false);
@@ -273,6 +298,9 @@ export async function diagnose() {
     access,
     files,
     grantedOrigins: granted?.origins ?? null,
+    // The switch on the extensions page and an actual grant are two different
+    // things, and only the second one lets anything touch a local file.
+    fileOriginGranted: Boolean(granted?.origins?.some((o) => o.startsWith('file://'))),
     ruleInstalled: rules.some((rule) => rule.id === RULE_ID),
     ruleCount: rules.length,
     rule: rules.find((rule) => rule.id === RULE_ID) ?? null,

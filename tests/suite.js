@@ -1040,6 +1040,78 @@ test('saving a range of pages keeps their text selectable', async () => {
   }
 });
 
+test('local files are asked for, and refusing them keeps the rest', async () => {
+  /*
+   * The switch on the browser's extensions page does not grant file access, it
+   * only makes it grantable. Without asking as well the extension holds none,
+   * and then nothing can touch a local PDF however that switch is set — which is
+   * why local files never worked on any machine.
+   */
+  const make = ({ fileSwitch, allowFile }) => {
+    const asked = [];
+    const store = new Map();
+    let held = [];
+    return {
+      asked,
+      held: () => held,
+      chrome: {
+        runtime: { id: 'test', getURL: (p) => `chrome-extension://test/${p}`, getManifest: () => ({ version: 'test' }) },
+        storage: {
+          local: {
+            get: async (key) => ({ [key]: store.get(key) }),
+            set: async (patch) => { for (const [k, v] of Object.entries(patch)) store.set(k, v); },
+          },
+        },
+        permissions: {
+          contains: async ({ origins }) => origins.every((o) => held.includes(o)),
+          request: async ({ origins }) => {
+            asked.push(origins.join(' '));
+            if (!allowFile && origins.some((o) => o.startsWith('file://'))) return false;
+            held = [...new Set([...held, ...origins])];
+            return true;
+          },
+          remove: async () => { held = []; return true; },
+          getAll: async () => ({ origins: held }),
+        },
+        declarativeNetRequest: {
+          updateDynamicRules: async () => {},
+          getDynamicRules: async () => [],
+        },
+        extension: { isAllowedFileSchemeAccess: async () => fileSwitch },
+      },
+    };
+  };
+
+  const real = globalThis.chrome;
+  try {
+    // Switch off: never asked for, so the web half is not put at risk.
+    let env = make({ fileSwitch: false, allowFile: false });
+    globalThis.chrome = env.chrome;
+    await turnOn();
+    assert(!env.asked.some((a) => a.includes('file://')),
+      'file access was asked for although the browser switch is off');
+    assert(env.held().includes('https://*/*'), 'the web access was not obtained');
+
+    // Switch on and allowed: asked for together, and held.
+    env = make({ fileSwitch: true, allowFile: true });
+    globalThis.chrome = env.chrome;
+    await turnOn();
+    assert(env.asked[0].includes('file:///*'), 'file access was not asked for');
+    assert(env.held().includes('file:///*'), 'file access was not obtained');
+    assert((await diagnose()).fileOriginGranted, 'the diagnostic does not report the file grant');
+
+    // Switch on but turned down: the web half still has to survive it.
+    env = make({ fileSwitch: true, allowFile: false });
+    globalThis.chrome = env.chrome;
+    const result = await turnOn();
+    assert(result.ok, 'refusing local files took the whole feature down with it');
+    assert(env.held().includes('https://*/*'), 'the web access was lost with the file refusal');
+    assert(env.asked.length === 2, `expected a second ask without file access, got ${env.asked.length}`);
+  } finally {
+    globalThis.chrome = real;
+  }
+});
+
 test('the setting is already on before the permission is granted', async () => {
   /*
    * Granting fires permissions.onAdded, and the background worker answers it by

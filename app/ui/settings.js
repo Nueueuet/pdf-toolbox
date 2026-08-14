@@ -13,6 +13,29 @@ import { modal } from './modal.js';
 import { toast } from './toast.js';
 import * as intercept from '../core/intercept.js';
 
+/**
+ * Local files need two separate things, and saying which one is missing is the
+ * difference between a fixable state and a mystery: the switch on the browser's
+ * extensions page, which only the user can set, and an actual grant of file
+ * access, which the extension has to ask for and can only ask for once that
+ * switch is on.
+ */
+function localFilesLine(switchOn, granted) {
+  if (granted) {
+    return h('span', h('strong', 'Local files are included. '),
+      'A PDF opened from your own computer comes here too.');
+  }
+  if (switchOn) {
+    return h('span', h('strong', 'Local files: nearly. '),
+      'The browser allows it, but this extension has not been given file access '
+      + 'yet — switch this off and on again to ask for it.');
+  }
+  return h('span', h('strong', 'Local files are not included. '),
+    'Switch on “Allow access to file URLs” on this extension’s entry in the '
+    + 'browser’s extensions page — only you can set that — then switch this off '
+    + 'and on again so it can be asked for.');
+}
+
 export function settingsDialog() {
   return modal({
     title: 'Settings',
@@ -165,17 +188,7 @@ async function renderInterception(body) {
           ' — the redirect happens before the request is sent, so there is no '
           + 'content type to go by yet. A PDF served from an address that does '
           + 'not say so opens in the browser’s viewer as before.'),
-        h('li', files
-          ? h('span',
-            h('strong', 'Local files: access is switched on. '),
-            'Whether the browser actually lets a local PDF be handed over is its own '
-            + 'decision — some builds keep file:// navigations to themselves. If one '
-            + 'still opens in the built-in viewer, that is why, and there is nothing '
-            + 'here that can change it.')
-          : h('span',
-            h('strong', 'Local files are not included. '),
-            'Switch on “Allow access to file URLs” on this extension’s entry in the '
-            + 'browser’s extensions page — only you can set that.')),
+        h('li', localFilesLine(files, state.fileOriginGranted)),
         h('li', 'PDFs inside a page — a preview embedded in a web page — are left alone.'),
       ),
     ),
