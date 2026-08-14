@@ -121,8 +121,28 @@ async function blueprint() {
   await writeFile(path.join(outDir, 'blueprint.pdf'), await doc.save());
 }
 
+/**
+ * A long one. Nothing about a handful of pages shows whether opening a document
+ * scales, and the cost that mattered in practice — laying out every page before
+ * showing any of it — only appears at this length.
+ */
+async function long() {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  for (let n = 1; n <= 148; n++) {
+    const page = doc.addPage([595.28, 841.89]);
+    page.drawText(`Page ${n} of 148`, { x: 60, y: 780, size: 18, font });
+    for (let line = 0; line < 24; line++) {
+      page.drawText('Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod.',
+        { x: 60, y: 730 - line * 22, size: 10, font });
+    }
+  }
+  await writeFile(path.join(outDir, 'long.pdf'), await doc.save());
+}
+
 await report();
 await mixed();
 await shorts();
 await blueprint();
+await long();
 console.log(`wrote sample PDFs to ${path.relative(process.cwd(), outDir)}`);

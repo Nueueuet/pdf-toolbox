@@ -26,6 +26,9 @@ const MAX_ZOOM = ZOOM_STEPS[ZOOM_STEPS.length - 1];
 /** Gap between pages in continuous layout, in CSS pixels. */
 const PAGE_GAP = 18;
 
+/** How far beyond the window a page is drawn, so scrolling meets a ready page. */
+const PAINT_MARGIN = 400;
+
 export class PageViewer {
   /**
    * @param {HTMLElement} root
@@ -246,12 +249,23 @@ export class PageViewer {
     this.pages.style.padding = `${padY}px ${padX}px`;
   }
 
-  /** Applies the current scale to every frame, without re-rendering bitmaps. */
+  /**
+   * Applies the current scale to every frame, without re-rendering bitmaps.
+   *
+   * Deliberately in two passes. Sizing a frame and then asking where it landed
+   * makes the browser settle the layout again before it can answer, and doing
+   * that once per page turns a long document into hundreds of forced
+   * recalculations — on a 148-page file it was the difference between the
+   * document appearing and a visible wait. So every size is written first, and
+   * only then is anything measured. Where each page sits is worked out from the
+   * heights just set rather than asked of the DOM at all.
+   */
   relayout() {
     const scale = this.effectiveZoom();
     this.pages.style.gap = `${PAGE_GAP}px`;
     let contentWidth = 0;
     let contentHeight = 0;
+    const placed = [];
 
     for (const [id, frame] of this.frames) {
       const w = Number(frame.dataset.w);
@@ -273,9 +287,22 @@ export class PageViewer {
       // zooming in does not just enlarge a blurry picture.
       const drawn = Number(frame.dataset.drawnScale || 0);
       if (drawn && (scale / drawn > 1.5 || drawn / scale > 2.5)) frame.dataset.needsRedraw = '1';
-      if (this.isVisible(frame)) this.paint(frame, id);
+
+      placed.push({ id, frame, height: pageHeight });
     }
+
     this.applyPanRoom(contentWidth, contentHeight);
+
+    // The only measurements taken, and taken once.
+    const top = this.padding().top;
+    const from = this.scroller.scrollTop - PAINT_MARGIN;
+    const to = this.scroller.scrollTop + this.scroller.clientHeight + PAINT_MARGIN;
+
+    let y = top;
+    for (const { id, frame, height } of placed) {
+      if (y + height > from && y < to) this.paint(frame, id);
+      y += height + PAGE_GAP;
+    }
     this.root.classList.toggle('is-fit', !this.canScroll());
   }
 
@@ -288,7 +315,7 @@ export class PageViewer {
   isVisible(frame) {
     const box = frame.getBoundingClientRect();
     const view = this.scroller.getBoundingClientRect();
-    return box.bottom > view.top - 400 && box.top < view.bottom + 400;
+    return box.bottom > view.top - PAINT_MARGIN && box.top < view.bottom + PAINT_MARGIN;
   }
 
   wireVisibility() {
@@ -301,7 +328,7 @@ export class PageViewer {
         this.paint(entry.target, id);
         if (this.layout === 'continuous') this.setCurrentFromScroll();
       }
-    }, { root: this.scroller, rootMargin: '400px 0px' });
+    }, { root: this.scroller, rootMargin: `${PAINT_MARGIN}px 0px` });
   }
 
   async paint(frame, id) {

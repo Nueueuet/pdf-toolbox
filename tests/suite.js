@@ -860,6 +860,51 @@ test('continuous layout stacks every page', async () => {
   }
 });
 
+test('a long document only draws the pages in view', async () => {
+  /*
+   * The point of this one is what does *not* happen. A 148-page document has to
+   * open at the speed of its first page: every frame exists so that scrolling
+   * has somewhere to go, but only what is near the window is rasterised.
+   *
+   * What made opening one slow was different again — sizing a frame and then
+   * asking where it landed, once per page, made the browser settle the layout
+   * 148 times over — and this test does not catch that. A timing assertion is a
+   * coin toss on someone else's machine, so the comment in relayout() carries
+   * that story instead.
+   */
+  const ws = await loadWorkspace(['long.pdf']);
+  assert(ws.pageCount === 148, `expected 148 pages, got ${ws.pageCount}`);
+
+  const host = document.createElement('div');
+  host.className = 'viewer';
+  host.style.cssText = 'position:fixed;left:0;top:0;width:800px;height:600px;opacity:0;z-index:9999';
+  document.body.appendChild(host);
+
+  const viewer = new PageViewer(host, ws, {});
+  try {
+    viewer.setLayout('continuous');
+    await viewer.open(ws.pages[0]);
+    await new Promise((resolve) => setTimeout(resolve, 600));
+
+    const frames = host.querySelectorAll('.viewer__page');
+    assert(frames.length === 148, `expected a frame per page, got ${frames.length}`);
+
+    // A 600px window fits about one page, plus the margin drawn ahead of it.
+    const drawn = host.querySelectorAll('.viewer__canvas canvas').length;
+    assert(drawn > 0, 'nothing was drawn at all');
+    assert(drawn <= 8, `${drawn} of 148 pages were rasterised; only the ones in view should be`);
+
+    // And the frames still stack in order, at the sizes the pages ask for.
+    const first = frames[0].getBoundingClientRect();
+    const second = frames[1].getBoundingClientRect();
+    assert(second.top > first.top, 'the pages are not stacked');
+    assert(Math.round(first.height) > 0, 'the frames have no height');
+  } finally {
+    viewer.destroy();
+    host.remove();
+  }
+});
+
 test('a wide sheet can be panned past all four of its edges', async () => {
   const ws = await loadWorkspace(['blueprint.pdf']);
   const host = document.createElement('div');
