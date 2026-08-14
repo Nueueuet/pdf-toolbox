@@ -137,16 +137,27 @@ async function mirror(fromDir, zipFile) {
   await copyInto(fromDir, unpacked);
   await writeFile(path.join(target, path.basename(zipFile)), await readFile(zipFile));
 
+  const locked = [];
   for (const extra of ALONGSIDE) {
     const from = path.join(root, extra);
-    if (!(await stat(from).then(() => true).catch(() => false))) continue;
-    await copyInto(from, path.join(target, extra));
+    const info = await stat(from).catch(() => null);
+    if (!info) continue;
+    const to = path.join(target, extra);
+    await copyInto(from, to);
+    /*
+     * Folders coming from here are generated wholesale, so what is no longer in
+     * them has to go. Renaming the screenshots once left both numberings side by
+     * side in the mirror — an upload picked from that folder would have mixed
+     * them.
+     */
+    if (info.isDirectory()) locked.push(...await prune(from, to, new Set()));
   }
 
-  // Only the build is pruned, and only against itself. Nothing at the top level
-  // is touched except the leftovers below, because that is the user's folder.
-  const locked = await prune(fromDir, unpacked, new Set());
+  // The build is pruned against itself. Nothing else at the top level is
+  // touched except the leftovers below, because that is the user's folder.
+  locked.push(...await prune(fromDir, unpacked, new Set()));
   locked.push(...await tidyTopLevel(target, path.basename(zipFile)));
+
   if (locked.length > 0) {
     console.warn(`  note: ${locked.length} old file(s) could not be removed (in use by a browser); harmless`);
   }
