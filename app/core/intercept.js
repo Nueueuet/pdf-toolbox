@@ -288,6 +288,21 @@ export async function diagnosticReport() {
   return JSON.stringify(state, null, 2);
 }
 
+/**
+ * Whether an address is one this feature is meant to take over.
+ *
+ * The same judgement the redirect rule makes, written once so the rule and the
+ * fallback below it cannot drift apart.
+ */
+export function looksLikePdf(url) {
+  return /^(https?|file):\/\/.*\.pdf($|\?)/i.test(url);
+}
+
+/** Where such an address gets handed to. */
+export function workspaceFor(url) {
+  return `${chrome.runtime.getURL('app/index.html')}?${OPEN_PARAM}${url}`;
+}
+
 /** A sensible file name for a document fetched from an address. */
 export function nameFromUrl(url) {
   try {

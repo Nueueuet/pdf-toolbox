@@ -4,7 +4,7 @@
  * there is one, otherwise it opens a fresh tab.
  */
 
-import { reconcile } from '../app/core/intercept.js';
+import { reconcile, isOn, looksLikePdf, workspaceFor } from '../app/core/intercept.js';
 
 const APP_URL = chrome.runtime.getURL('app/index.html');
 
@@ -38,4 +38,40 @@ chrome.runtime.onInstalled.addListener(({ reason }) => {
 chrome.runtime.onStartup.addListener(() => reconcile());
 chrome.permissions.onAdded.addListener(() => reconcile());
 chrome.permissions.onRemoved.addListener(() => reconcile());
+
+/*
+ * Second way in, for when the redirect rule is installed and correct and the
+ * browser simply does not act on it.
+ *
+ * That is not hypothetical: on one machine the rule works, and on another with
+ * the same extension, the same granted access and a rule that reads back
+ * identically, PDFs carry on opening in the browser's own viewer. Rather than
+ * keep guessing at the difference, this watches for a tab arriving at a PDF and
+ * sends it to the workspace itself.
+ *
+ * It needs no permission of its own: the address of a tab is visible to an
+ * extension that already has access to that site, which is exactly the access
+ * this feature asks for and nothing more. Where the rule does work this never
+ * gets the chance to fire, because by then the tab is already on an
+ * extension address, which is not a PDF.
+ */
+const handled = new Map(); // tab id -> the address already sent onward
+
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
+  const url = changeInfo.url;
+  if (!url || !looksLikePdf(url)) return;
+  // Going back to a page we already took over must not bounce it again.
+  if (handled.get(tabId) === url) return;
+  if (!await isOn()) return;
+
+  handled.set(tabId, url);
+  try {
+    await chrome.tabs.update(tabId, { url: workspaceFor(url) });
+  } catch (err) {
+    handled.delete(tabId);
+    console.warn('could not hand the document over', err);
+  }
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => handled.delete(tabId));
 

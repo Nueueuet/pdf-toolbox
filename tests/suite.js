@@ -22,7 +22,9 @@ import { PageViewer } from '../app/ui/pageviewer.js';
 import { analysePage } from '../app/core/coverage.js';
 import { ocrAvailable, ocrPage } from '../app/core/ocr.js';
 import { ocrLines } from '../app/ui/ocrlayer.js';
-import { targetOf, nameFromUrl, supported, turnOn, turnOff, reconcile, diagnose } from '../app/core/intercept.js';
+import {
+  targetOf, nameFromUrl, supported, turnOn, turnOff, reconcile, diagnose, looksLikePdf, workspaceFor,
+} from '../app/core/intercept.js';
 import { PDFDocument, StandardFonts } from '../vendor/pdf-lib.esm.js';
 import * as pdfjsLib from '../vendor/pdf.mjs';
 
@@ -1105,6 +1107,36 @@ test('the setting is already on before the permission is granted', async () => {
       'the rule does not redirect to the workspace');
     assert(/\\0$/.test(rule.action.redirect.regexSubstitution),
       'the original address is not carried through to the workspace');
+
+    // The fallback has to land on the same address the rule builds, and that
+    // address has to be readable back out at the far end.
+    const url = 'https://example.com/a.pdf?token=abc&page=2';
+    const handover = workspaceFor(url);
+    assert(handover === rule.action.redirect.regexSubstitution.replace('\\0', url),
+      `the fallback sends documents somewhere else: ${handover}`);
+    assert(targetOf(handover.slice(handover.indexOf('?'))) === url,
+      'the address does not survive the fallback hand-over');
+
+    /*
+     * The rule and the tab-watching fallback have to agree about what a PDF
+     * address is. They are two separate expressions of the same judgement, and a
+     * document caught by one but not the other would behave differently
+     * depending on which mechanism happened to fire.
+     */
+    const pattern = new RegExp(rule.condition.regexFilter, 'i');
+    const cases = [
+      ['https://example.com/report.pdf', true],
+      ['http://example.com/a/b/report.PDF', true],
+      ['https://example.com/report.pdf?token=abc', true],
+      ['file:///C:/reports/q1.pdf', true],
+      ['https://example.com/report.pdfx', false],
+      ['https://example.com/download/8821', false],
+      ['chrome-extension://abc/app/index.html?open=https://x/y.pdf', false],
+    ];
+    for (const [url, want] of cases) {
+      assert(looksLikePdf(url) === want, `looksLikePdf("${url}") should be ${want}`);
+      assert(pattern.test(url) === want, `the rule pattern disagrees about "${url}"`);
+    }
 
     // Switching off has to take the rule with it, not just the setting.
     await turnOff();

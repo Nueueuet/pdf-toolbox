@@ -110,6 +110,20 @@ How it works: a `declarativeNetRequest` rule redirects a navigation to a `.pdf`
 address to the workspace, before the request is sent. The browser therefore
 never receives a PDF and its own viewer never comes into it.
 
+There is a second way in behind it, because that rule cannot be relied on. On
+one machine it works; on another, with the same extension, the same granted
+access and a rule that reads back identically, the browser simply does not act
+on it. So the background worker also watches for a tab arriving at a PDF and
+sends it to the workspace itself. It needs no permission of its own — a tab's
+address is visible to an extension that already has access to that site — and
+where the rule does work the watcher never gets the chance to fire, because by
+then the tab is already on an extension address.
+
+The settings dialog has a **Diagnostics** section reporting exactly what the
+browser has been told and what it accepted: granted origins, whether the rule is
+installed and what it looks like, and the last thing it complained about. That
+is the only way to tell a refused rule from an ignored one from another machine.
+
 Two consequences worth knowing:
 
 - **It goes by the address, not the content type.** A redirect has to happen
