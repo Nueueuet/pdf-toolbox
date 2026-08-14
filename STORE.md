@@ -270,18 +270,19 @@ running app with real documents loaded — not mock-ups. Retake them whenever th
 interface changes: a screenshot showing a tool rail the user will not find is
 worse than no screenshot at all.
 
-Upload the seven in this order. The store puts the **first** one on the item's
+Upload the eight in this order. The store puts the **first** one on the item's
 card, so it leads with the thing nothing else in this category does offline.
 
 | # | File | Shows |
 | --- | --- | --- |
 | 1 | `screenshot-1-ocr.png` | OCR, with two scanned pages marked amber and three grey ones it can tell already have text |
 | 2 | `screenshot-2-viewer.png` | The viewer: page field, zoom, the arrows at the sides, both page layouts |
-| 3 | `screenshot-3-merge.png` | Three files merged into one grid |
-| 4 | `screenshot-4-split.png` | Cut marks between pages, and the parts they will produce |
-| 5 | `screenshot-5-write.png` | A text box being edited on the page |
-| 6 | `screenshot-6-compress.png` | Four compression levels with measured sizes |
-| 7 | `screenshot-7-copytext.png` | Selecting text straight off the pages |
+| 3 | `screenshot-3-reading.png` | Reading mode: side panels collapsed, tools down to their symbols |
+| 4 | `screenshot-4-merge.png` | Three files merged into one grid |
+| 5 | `screenshot-5-split.png` | Cut marks between pages, and the parts they will produce |
+| 6 | `screenshot-6-write.png` | A text box being edited on the page |
+| 7 | `screenshot-7-compress.png` | Four compression levels with measured sizes |
+| 8 | `screenshot-8-copytext.png` | Selecting text straight off the pages |
 
 Both promotional tiles are produced by the same command:
 `promo-small-440x280.png` and `promo-large-1400x560.png`. The small tile is the

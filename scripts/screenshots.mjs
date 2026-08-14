@@ -42,35 +42,51 @@ const SCENES = [
     caption: 'The viewer, with the page field and the arrows at the sides',
   },
   {
-    file: 'screenshot-3-merge.png',
+    /*
+     * An ordinary document rather than the wide test sheet.
+     *
+     * The blueprint demonstrates the gain better — it goes from 28% to 49% of
+     * its true size — but it is a synthetic file with LEFT EDGE and RIGHT EDGE
+     * painted on it for the panning test, and that reads as a debugging artefact
+     * on a store page. What this shot has to show is the interface getting out
+     * of the way, and a real-looking document shows that honestly.
+     */
+    file: 'screenshot-3-reading.png',
+    width: 1280,
+    height: 800,
+    url: `/app/index.html?demo=viewer&files=report.pdf&page=2&layout=continuous&compact=1`,
+    caption: 'Reading mode: the panels collapsed, the tools down to their symbols',
+  },
+  {
+    file: 'screenshot-4-merge.png',
     width: 1280,
     height: 800,
     url: `/app/index.html?demo=merge&zoom=0.3`,
     caption: 'Several files merged, pages reorderable by drag',
   },
   {
-    file: 'screenshot-4-split.png',
+    file: 'screenshot-5-split.png',
     width: 1280,
     height: 800,
     url: `/app/index.html?demo=split&zoom=0.3&cuts=2,5`,
     caption: 'Split marks sitting between the pages',
   },
   {
-    file: 'screenshot-5-write.png',
+    file: 'screenshot-6-write.png',
     width: 1280,
     height: 800,
     url: `/app/index.html?demo=write&files=report.pdf&annot=1`,
     caption: 'A text box being edited on the page',
   },
   {
-    file: 'screenshot-6-compress.png',
+    file: 'screenshot-7-compress.png',
     width: 1280,
     height: 800,
     url: `/app/index.html?demo=compress&files=report.pdf&zoom=0.28`,
     caption: 'Compression levels with measured output sizes',
   },
   {
-    file: 'screenshot-7-copytext.png',
+    file: 'screenshot-8-copytext.png',
     width: 1280,
     height: 800,
     url: `/app/index.html?demo=copytext&zoom=0.3`,
