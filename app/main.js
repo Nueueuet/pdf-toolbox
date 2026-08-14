@@ -19,6 +19,10 @@ import { toast, progressToast } from './ui/toast.js';
 import { baseName, formatBytes } from './util/format.js';
 import { parseRange, formatRange } from './util/ranges.js';
 import { rangeField } from './ui/controls.js';
+import * as storage from './core/storage.js';
+
+/** Where the shell remembers how it was left. */
+const SHELL_KEY = 'shell';
 import { IN_EXTENSION } from './core/paths.js';
 import { makeAnnot } from './core/annots.js';
 import { PDFDocument } from '../vendor/pdf-lib.esm.js';
@@ -29,6 +33,7 @@ class App {
     this.activeToolId = null;
     this.currentPageId = null;
     this.surface = 'grid';
+    this.compact = false;
     this.panelCleanups = [];
     this.annotListeners = [];
 
@@ -122,6 +127,10 @@ class App {
     // is in an arrangement nobody asked for, and is thrown away a moment later.
     this.viewer.layout = DEFAULT_LAYOUT;
 
+    storage.get(SHELL_KEY, {}).then((shell) => {
+      if (shell?.compact) this.setCompact(true, { remember: false });
+    });
+
     // A reading layout is a habit, not a per-document choice, so it is restored
     // before the first document is even open.
     loadViewerSettings().then((settings) => {
@@ -181,6 +190,60 @@ class App {
     } finally {
       this.showOpening(null);
     }
+  }
+
+  /**
+   * Reading mode: the options panel away, the tool rail down to its symbols.
+   *
+   * A habit rather than a per-document choice, so it is remembered — like the
+   * page layout, and for the same reason.
+   */
+  setCompact(on, { remember = true } = {}) {
+    this.compact = Boolean(on);
+    $('#app').classList.toggle('is-compact', this.compact);
+
+    const button = $('#compactBtn');
+    button.setAttribute('aria-pressed', String(this.compact));
+    const label = this.compact ? 'Show the side panels' : 'Collapse the side panels';
+    button.title = label;
+    button.setAttribute('aria-label', label);
+
+    // The workspace changed width, so anything sized against it has to be told.
+    if (this.mode === 'viewer') this.viewer.relayout();
+    if (remember) storage.set(SHELL_KEY, { compact: this.compact });
+  }
+
+  async toggleFullscreen() {
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else await document.documentElement.requestFullscreen();
+    } catch (err) {
+      // Refused by the browser — nothing to recover from, but silence would
+      // leave a button that visibly does nothing.
+      toast(`Full screen was refused: ${err.message}`, { tone: 'error' });
+    }
+  }
+
+  syncFullscreen() {
+    const on = Boolean(document.fullscreenElement);
+    const button = $('#fullscreenBtn');
+    button.setAttribute('aria-pressed', String(on));
+    const label = on ? 'Leave full screen' : 'Full screen';
+    button.title = on ? `${label} (Escape)` : `${label} (F11)`;
+    button.setAttribute('aria-label', label);
+    /*
+     * Set as attributes, not as the `hidden` property.
+     *
+     * These are SVG paths, and `hidden` is an HTMLElement property — assigning
+     * it to an SVG element quietly creates an expando that reflects nowhere, so
+     * the icon never changes. Only the attribute reaches the stylesheet.
+     */
+    for (const [path, show] of [['.js-enter', !on], ['.js-exit', on]]) {
+      const el = button.querySelector(path);
+      if (show) el.removeAttribute('hidden');
+      else el.setAttribute('hidden', '');
+    }
+    if (this.mode === 'viewer') this.viewer.relayout();
   }
 
   /** The waiting room, so a hand-over is never a blank workspace. */
@@ -267,6 +330,7 @@ class App {
     if (params.get('grid')) this.showGrid();
     this.selectTool(params.get('demo') || 'merge');
     if (params.get('nav')) document.body.classList.add('demo-nav');
+    if (params.get('compact')) this.setCompact(true, { remember: false });
     if (params.get('page')) {
       const page = this.ws.pages[Number(params.get('page')) - 1];
       if (page) this.openPage(page);
@@ -334,7 +398,8 @@ class App {
         rail.appendChild(h('button.rail__item', {
           type: 'button',
           dataset: { tool: tool.id },
-          title: tool.blurb,
+          // Name first: collapsed to symbols, this tooltip is the only label.
+          title: `${tool.label} — ${tool.blurb}`,
           onclick: () => this.selectTool(tool.id),
         }, svg, h('span', tool.label)));
       }
@@ -370,6 +435,10 @@ class App {
     }
 
     $('#settingsBtn').addEventListener('click', () => settingsDialog());
+    $('#compactBtn').addEventListener('click', () => this.setCompact(!this.compact));
+    $('#fullscreenBtn').addEventListener('click', () => this.toggleFullscreen());
+    // Leaving full screen by the Escape key or F11 has to move the button too.
+    document.addEventListener('fullscreenchange', () => this.syncFullscreen());
     $('#backToGrid').addEventListener('click', () => this.showGrid());
     $('#viewerToGrid').addEventListener('click', () => this.showGrid());
     const pageInput = $('#viewerPageInput');

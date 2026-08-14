@@ -90,6 +90,18 @@ npm run vendor:ocr
 Page ranges are accepted anywhere you see a page field: `all`, `1-10`,
 `1,4,10`, `1`, and also `odd`, `even`, `last` and open ranges like `5-`.
 
+## Reading mode
+
+Two buttons in the top right, beside the gear:
+
+- **Collapse the side panels** takes the options panel away and reduces the tool
+  rail to its symbols, so the page gets the width. The tools stay reachable —
+  each keeps its name as a tooltip. Remembered between sessions.
+- **Full screen** hands the whole window to the document, the browser's own
+  address bar and bookmarks included. Escape or F11 comes back.
+
+The top bar stays either way: it carries the document name and Save.
+
 **Save PDF** asks which pages, the way a print dialog does — except that what
 comes out is the document rather than a picture of it, so the text stays
 selectable and searchable. It opens on whatever is selected in the grid, or
