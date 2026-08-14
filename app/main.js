@@ -262,8 +262,10 @@ class App {
     // before the panel is built, so the panel agrees with the surface.
     if (params.get('layout')) this.viewer.setLayout(params.get('layout'));
 
-    this.selectTool(params.get('demo') || 'merge');
+    // Surface first, then the tool: a panel reads the surface it is built on, so
+    // choosing the tool while the wrong one is showing bakes that into the shot.
     if (params.get('grid')) this.showGrid();
+    this.selectTool(params.get('demo') || 'merge');
     if (params.get('nav')) document.body.classList.add('demo-nav');
     if (params.get('page')) {
       const page = this.ws.pages[Number(params.get('page')) - 1];
