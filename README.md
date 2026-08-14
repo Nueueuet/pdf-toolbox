@@ -191,11 +191,22 @@ Google account and a one-time \$5 developer fee, so that part is yours to do.
 Every upload needs a higher `version` in `manifest.json` than the last one, and
 each update goes through review again.
 
-To keep an unpacked copy somewhere else in sync — a synced drive, so other
+To keep everything an upload needs somewhere else — a synced drive, so other
 machines can load it without cloning — put that folder's absolute path in
 `mirror.local.txt` (gitignored) or set `PDF_TOOLBOX_MIRROR`. `npm run package`
-then refreshes it, and refuses to touch a folder that is neither empty nor a
-previous build.
+then fills it in:
+
+```
+extension/              the unpacked build — this is the folder to load
+store-assets/           screenshots and promotional tiles
+pdf-toolbox-<v>.zip     the package to upload
+STORE.md                the listing text to paste
+```
+
+Only `extension/` is rewritten wholesale each time. Beside it, nothing is
+removed except superseded zips, because that folder belongs to whoever set it —
+a build script has no business deleting what it did not write. It also refuses a
+destination that is neither empty nor a previous build.
 
 Until it is in the store, *Load unpacked* works on every machine and survives
 restarts.

@@ -22,6 +22,16 @@ const INCLUDE = ['manifest.json', 'app', 'background', 'sandbox', 'icons', 'vend
 /** Dropped even inside the included trees. */
 const EXCLUDE = new Set(['.DS_Store', 'Thumbs.db']);
 
+/**
+ * Mirrored alongside the extension, though not part of it.
+ *
+ * Everything an upload needs should sit in one folder: the package, the pictures
+ * that go with it, and the text to paste into the dashboard. The browser ignores
+ * files it does not know about, so a folder carrying these is still loadable
+ * unpacked.
+ */
+const ALONGSIDE = ['store-assets', 'STORE.md'];
+
 const manifest = JSON.parse(await readFile(path.join(root, 'manifest.json'), 'utf8'));
 
 // The store rejects a package whose manifest points at files that are not in it,
@@ -54,9 +64,22 @@ async function copyInto(from, to) {
   await writeFile(to, await readFile(from));
 }
 
+/** The build itself goes in here, so the rest of the folder stays legible. */
+const UNPACKED_DIR = 'extension';
+
 /**
- * Optionally mirrors the built extension to a folder outside the repo — a synced
- * drive, say, so other machines can load it unpacked without cloning anything.
+ * Optionally mirrors everything an upload needs to a folder outside the repo — a
+ * synced drive, say, so other machines can load it unpacked without cloning
+ * anything. The destination ends up laid out like this:
+ *
+ *   extension/              the unpacked build — this is the folder to load
+ *   store-assets/           screenshots and promotional tiles
+ *   pdf-toolbox-<v>.zip     the package to upload
+ *   STORE.md                the listing text to paste
+ *
+ * Only `extension/` is rewritten wholesale on each build. Everything beside it
+ * is refreshed but never pruned against the build, so nothing put there by hand
+ * is swept away by the next run.
  *
  * The destination is machine-specific, so it lives in a gitignored file rather
  * than in this script: put the absolute path in `mirror.local.txt`, or set
@@ -88,7 +111,12 @@ async function mirror(fromDir, zipFile) {
   }
 
   if (existing.length > 0) {
-    const looksLikeOurs = existing.includes('manifest.json') || existing.includes('vendor');
+    // Either layout counts as ours: the current one, or the flat one this used
+    // to write before the build moved into a folder of its own.
+    const looksLikeOurs = existing.includes(UNPACKED_DIR)
+      || existing.includes('manifest.json')
+      || existing.includes('vendor')
+      || existing.includes('store-assets');
     if (!looksLikeOurs) {
       console.warn(`  skip mirror: ${target} is not empty and does not look like a previous build`);
       console.warn('         empty it yourself if you really want it overwritten');
@@ -105,17 +133,63 @@ async function mirror(fromDir, zipFile) {
    * way the destination is always complete, and stale files are pruned
    * afterwards on a best-effort basis.
    */
-  await copyInto(fromDir, target);
+  const unpacked = path.join(target, UNPACKED_DIR);
+  await copyInto(fromDir, unpacked);
   await writeFile(path.join(target, path.basename(zipFile)), await readFile(zipFile));
-  const locked = await prune(fromDir, target, path.basename(zipFile));
+
+  for (const extra of ALONGSIDE) {
+    const from = path.join(root, extra);
+    if (!(await stat(from).then(() => true).catch(() => false))) continue;
+    await copyInto(from, path.join(target, extra));
+  }
+
+  // Only the build is pruned, and only against itself. Nothing at the top level
+  // is touched except the leftovers below, because that is the user's folder.
+  const locked = await prune(fromDir, unpacked, new Set());
+  locked.push(...await tidyTopLevel(target, path.basename(zipFile)));
   if (locked.length > 0) {
     console.warn(`  note: ${locked.length} old file(s) could not be removed (in use by a browser); harmless`);
   }
   return target;
 }
 
-/** Removes anything in `target` that is no longer in `source`. Never throws. */
-async function prune(source, target, keepFile, base = '') {
+/**
+ * Clears out only what this script itself put at the top level in the past: the
+ * build, back when it was written loose into the folder, and superseded zips.
+ *
+ * Deliberately a short list rather than "everything unrecognised". This is a
+ * folder somebody keeps their own things in, and a build script has no business
+ * deleting what it did not write.
+ */
+async function tidyTopLevel(target, currentZip) {
+  const stale = [];
+  let entries;
+  try {
+    entries = await readdir(target, { withFileTypes: true });
+  } catch {
+    return stale;
+  }
+
+  for (const entry of entries) {
+    const leftFlat = INCLUDE.includes(entry.name);
+    const oldZip = /^pdf-toolbox-.*\.zip$/.test(entry.name) && entry.name !== currentZip;
+    if (!leftFlat && !oldZip) continue;
+    try {
+      await rm(path.join(target, entry.name), { recursive: true, force: true });
+    } catch {
+      stale.push(entry.name);
+    }
+  }
+  return stale;
+}
+
+/**
+ * Removes anything in `target` that is no longer in `source`. Never throws.
+ *
+ * @param {Set<string>} keep relative paths that belong there despite not being
+ *   part of the build.
+ */
+async function prune(source, target, keep, base = '') {
   const stale = [];
   let entries;
   try {
@@ -126,7 +200,7 @@ async function prune(source, target, keepFile, base = '') {
 
   for (const entry of entries) {
     const relative = base ? `${base}/${entry.name}` : entry.name;
-    if (relative === keepFile) continue;
+    if (keep.has(relative)) continue;
 
     const origin = path.join(source, relative);
     const here = path.join(target, relative);
@@ -140,7 +214,7 @@ async function prune(source, target, keepFile, base = '') {
       }
       continue;
     }
-    if (entry.isDirectory()) stale.push(...(await prune(source, target, keepFile, relative)));
+    if (entry.isDirectory()) stale.push(...(await prune(source, target, keep, relative)));
   }
   return stale;
 }
@@ -205,6 +279,9 @@ const mb = (bytes) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 console.log(`\nwrote dist/${zipName}`);
 console.log(`  packed ${mb(packed)}, unpacked ${mb(unpacked)}`);
 console.log(`  AI upscaler: ${aiIncluded ? 'included' : 'not included'}`);
-if (mirroredTo) console.log(`  mirrored to ${mirroredTo}`);
+if (mirroredTo) {
+  console.log(`  mirrored to ${mirroredTo}`);
+  console.log(`    ${UNPACKED_DIR}/ — load this folder unpacked; the zip, the pictures and STORE.md sit beside it`);
+}
 if (packed > 100 * 1024 * 1024) console.warn('  warning: the Chrome Web Store limit is 100 MB');
 console.log('\nNext: see STORE.md — publishing needs your Google account, so it is a manual step.');
