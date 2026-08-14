@@ -141,9 +141,9 @@ class App {
       this.runDemo().catch((err) => console.error('demo setup failed', err));
     }
 
-    // Arrived here because a PDF on the web was redirected to us.
+    // Arrived here because a PDF was handed over to us.
     const handed = targetOf();
-    if (handed) this.openFromWeb(handed);
+    if (handed) this.openHandover(handed);
   }
 
   /**
@@ -152,23 +152,50 @@ class App {
    * The address is left in the tab's own bar untouched — going back has to lead
    * to where the reader came from, not to an empty workspace.
    */
-  async openFromWeb(url) {
-    const progress = progressToast('Fetching the document…');
+  async openHandover(url) {
+    const name = nameFromUrl(url);
+    this.showOpening(name);
     try {
-      // Same credentials the browser would have used, so a PDF behind a login
-      // arrives rather than turning into a page of HTML saying "please sign in".
-      const response = await fetch(url, { credentials: 'include' });
+      /*
+       * The download was very likely started by handover.js before any of this
+       * was even evaluated, in which case this picks up a request already well
+       * on its way. Falling back to starting it here keeps the app working on
+       * its own — the tests and the dev server both come in this way.
+       *
+       * Credentials are included either way, so a PDF behind a login arrives
+       * rather than turning into a page of HTML saying "please sign in".
+       */
+      const early = window.__pdfToolboxHandover;
+      const response = early?.url === url
+        ? await early.response
+        : await fetch(url, { credentials: 'include' });
       if (!response.ok) throw new Error(`the server answered ${response.status}`);
 
       const blob = await response.blob();
-      progress.done(null);
-      await this.importFiles([new File([blob], nameFromUrl(url), { type: 'application/pdf' })]);
+      await this.importFiles([new File([blob], name, { type: 'application/pdf' })]);
     } catch (err) {
-      console.error('could not open the redirected document', err);
-      progress.fail(`Could not fetch that PDF: ${err.message}`);
+      console.error('could not open the handed-over document', err);
+      toast(`Could not fetch that PDF: ${err.message}`, { tone: 'error', timeout: 8000 });
       // Better a viewer that works than one that insists.
       this.offerBrowserViewer(url);
+    } finally {
+      this.showOpening(null);
     }
+  }
+
+  /** The waiting room, so a hand-over is never a blank workspace. */
+  showOpening(name) {
+    $('#opening').hidden = !name;
+    if (name) {
+      $('#openingLabel').textContent = `Opening ${name}…`;
+      // The empty-document screen would otherwise sit underneath, inviting a
+      // file to be chosen while one is already on its way.
+      this.el.landing.hidden = true;
+      return;
+    }
+    // Back to whichever screen the workspace calls for — the document that
+    // arrived, or, if it never did, the invitation to open one after all.
+    this.onPagesChanged();
   }
 
   offerBrowserViewer(url) {

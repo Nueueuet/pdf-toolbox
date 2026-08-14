@@ -43,6 +43,12 @@
       <nav class="rail" id="rail" aria-label="Tools" hidden></nav>
 
       <main class="workspace" id="workspace">
+        <!-- Shown the moment a document is handed over, so the wait is not a blank room. -->
+        <section class="opening" id="opening" hidden>
+          <div class="opening__spinner" aria-hidden="true"></div>
+          <p class="opening__label" id="openingLabel">Opening…</p>
+        </section>
+
         <!-- Empty state: the whole surface is a drop target. -->
         <section class="landing" id="landing">
           <h1 class="landing__title">Edit PDF files</h1>
@@ -122,6 +128,9 @@
   <input type="file" id="filePicker" accept="application/pdf,image/png,image/jpeg" multiple hidden>
   <div id="toasts"></div>
   <div id="modalRoot"></div>
+
+  <!-- Above the modules, and classic, so the download starts first. See handover.js. -->
+  <script src="handover.js"></script>
 
   <!-- JSZip only ships a classic build; loading it here keeps the app modules clean. -->
   <script src="../vendor/jszip.js"></script>

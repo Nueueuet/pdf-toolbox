@@ -1632,6 +1632,39 @@ button { font: inherit; }
 
 .btn--small { padding: 4px 10px; font-size: 12.5px; }
 
+/* ----------------------------------------------------------------- opening */
+
+.opening {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+}
+
+.opening__spinner {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 3px solid var(--line);
+  border-top-color: var(--blue);
+  animation: opening-spin .8s linear infinite;
+}
+
+@keyframes opening-spin { to { transform: rotate(360deg); } }
+
+.opening__label {
+  margin: 0;
+  font-size: 14px;
+  color: var(--ink-soft);
+}
+
+/* Nothing should spin for the sake of it where that is unwelcome. */
+@media (prefers-reduced-motion: reduce) {
+  .opening__spinner { animation-duration: 2.4s; }
+}
+
 .settings__diag {
   max-height: 220px;
   margin: 10px 0 0;
