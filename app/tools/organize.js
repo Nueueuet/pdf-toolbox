@@ -11,6 +11,7 @@ import { renderPageCanvas } from '../core/render.js';
 import { normalizeQuarter } from '../core/workspace.js';
 import { normalizeCrop } from '../core/geometry.js';
 import { baseName } from '../util/format.js';
+import { fillCounter, hasCounter } from '../core/counter.js';
 import { progressToast, toast } from '../ui/toast.js';
 
 /**
@@ -174,8 +175,33 @@ const split = {
      * when a cut is dragged one page and back.
      */
     const chosenNames = new Map();
+
+    /*
+     * Naming the parts in sequence.
+     *
+     * The whole point of cutting every so many pages is to get a run of files —
+     * "bild 1, bild 2, bild 3" — and typing each of those by hand undoes the
+     * saving. With the switch on, one pattern names them all and the boxes below
+     * show what will come out; with it off, each is typed separately.
+     */
+    const numbering = checkbox({ label: 'Number the parts', checked: false });
+    const pattern = textInput({ value: `${baseName(ctx.ws.name)} {n}`, placeholder: 'bild {n}' });
+    const numberFrom = textInput({ value: '1', placeholder: '1' });
+    const numberStep = numberInput({ value: 1, min: 1, max: 999 });
+
     const defaultName = (index) => `${baseName(ctx.ws.name)} cut ${index + 1}.pdf`;
-    const nameFor = (index) => chosenNames.get(index) || defaultName(index);
+
+    const nameFor = (index) => {
+      if (numbering.checked) {
+        const text = pattern.value.trim() || `${baseName(ctx.ws.name)} {n}`;
+        const filled = fillCounter(hasCounter(text) ? text : `${text} {n}`, index, {
+          start: numberFrom.value.trim() || '1',
+          step: Math.max(1, numberStep.valueAsNumber || 1),
+        });
+        return /\.pdf$/i.test(filled) ? filled : `${filled}.pdf`;
+      }
+      return chosenNames.get(index) || defaultName(index);
+    };
 
     const renderPreview = () => {
       clear(preview);
@@ -188,8 +214,11 @@ const split = {
         const name = h('input.partrow__name', {
           value: nameFor(index),
           spellcheck: 'false',
+          // While a pattern is naming them, these show what will come out rather
+          // than offering an edit that the next keystroke elsewhere would undo.
+          readOnly: numbering.checked,
           'aria-label': `Name of part ${index + 1}`,
-          title: 'Click to rename this part',
+          title: numbering.checked ? 'Named by the pattern above' : 'Click to rename this part',
           oninput: () => {
             const typed = name.value.trim();
             if (typed && typed !== defaultName(index)) chosenNames.set(index, typed);
@@ -202,6 +231,20 @@ const split = {
         ));
       });
     };
+
+    const numberingFields = h('div.numbering',
+      field('Pattern', pattern, '{n} is where the number goes: 1, 2, 3. {a} or {A} for letters, {i} or {I} for roman numerals. Left out entirely, it is added at the end.'),
+      h('div.grid2', field('Start at', numberFrom), field('Count up by', numberStep)),
+    );
+    numberingFields.hidden = true;
+
+    numbering.addEventListener('change', () => {
+      numberingFields.hidden = !numbering.checked;
+      renderPreview();
+    });
+    for (const control of [pattern, numberFrom, numberStep]) {
+      control.addEventListener('input', renderPreview);
+    }
 
     cutsInput.addEventListener('input', pushToWorkspace);
     ctx.onClose(ctx.ws.on('cuts', pullFromWorkspace));
@@ -255,7 +298,12 @@ const split = {
         buttonRow(button('Clear all cuts', { onclick: () => ctx.ws.setCuts([]) })),
         hint('Click between two pages to cut there. Click the scissors again to remove that cut, or drag them to another gap to move it. While this tool is open, every possible cut position is marked.'),
       ),
-      section('Result', preview, zipToggle),
+      section('Result',
+        numbering,
+        numberingFields,
+        preview,
+        zipToggle,
+      ),
       section(null, buttonRow(primary('Split & save', { onclick: run }))),
     );
   },

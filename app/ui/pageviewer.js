@@ -227,13 +227,39 @@ export class PageViewer {
   }
 
   /** Points at the live page object after undo replaced the old one. */
+  /**
+   * Points at the current object for a page and redraws, without moving.
+   *
+   * The view is anchored on the page being worked on: where its top sat in the
+   * window before is where it sits afterwards. Cropping is what this is for —
+   * the page genuinely becomes smaller, and without an anchor the whole document
+   * jumps to the top and appears to have zoomed out, when all that was asked for
+   * was to trim one page.
+   */
   async rebind(page) {
     if (!page) return;
     this.currentPageId = page.id;
-    await this.render();
+
+    const anchor = this.frames.get(page.id);
+    const offset = anchor
+      ? anchor.getBoundingClientRect().top - this.scroller.getBoundingClientRect().top
+      : null;
+
+    // Told not to scroll to the page on its way through: render() otherwise puts
+    // it at the top of the window first, and anchoring on top of that is one
+    // movement correcting another rather than simply not moving.
+    await this.render({ keepScroll: offset !== null });
+
+    const settled = this.frames.get(page.id);
+    if (offset === null || !settled) return;
+    const now = settled.getBoundingClientRect().top - this.scroller.getBoundingClientRect().top;
+    this.scroller.scrollTop += now - offset;
+    // Sideways it is centred, which for a page that just changed width is the
+    // only place that reads as "the same page, trimmed".
+    this.scroller.scrollLeft = (this.scroller.scrollWidth - this.scroller.clientWidth) / 2;
   }
 
-  async render() {
+  async render({ keepScroll = false } = {}) {
     const token = ++this.renderToken;
     clear(this.pages);
     this.frames.clear();
@@ -256,7 +282,7 @@ export class PageViewer {
     this.applyEditMode();
     for (const [id, frame] of this.frames) this.drawInspection(frame, this.ws.pageById(id));
     this.syncNav();
-    if (this.layout === 'continuous') this.scrollToPage(this.currentPageId, 'auto');
+    if (this.layout === 'continuous' && !keepScroll) this.scrollToPage(this.currentPageId, 'auto');
     if (token === this.renderToken) this.handlers.onZoomChange?.(this.effectiveZoom(), this.zoom === null);
   }
 
@@ -325,9 +351,19 @@ export class PageViewer {
    * rectangle; annotations belong to every page and are drawn on all of them.
    */
   setEditMode(mode) {
+    const was = this.editMode;
     this.editMode = mode;
     this.root.dataset.mode = mode;
     this.applyEditMode();
+
+    // Entering or leaving crop changes what the page shows, so it is redrawn.
+    if ((was === 'crop') !== (mode === 'crop')) {
+      const frame = this.frames.get(this.currentPageId);
+      if (frame) {
+        delete frame.dataset.drawnScale;
+        this.paint(frame, this.currentPageId);
+      }
+    }
   }
 
   applyEditMode() {
@@ -363,6 +399,16 @@ export class PageViewer {
 
     for (const [kind, boxes] of groups) {
       for (const box of boxes) {
+        /*
+         * Slivers are skipped.
+         *
+         * A PDF is full of runs with nothing in them — positioning marks, empty
+         * table cells, the odd stray space — and a box drawn round each of those
+         * is a mark on the page with nothing under it to explain it. Down the
+         * outer margin of a form they line up into a dotted edge that looks like
+         * recognition gone wrong.
+         */
+        if (box.w < 0.004 || box.h < 0.003) continue;
         host.appendChild(h(`div.inspectbox.inspectbox--${kind}`, {
           style: {
             left: `${box.x * 100}%`,
@@ -630,7 +676,17 @@ export class PageViewer {
        * until the next repaint caught up — one text box, two apparent copies,
        * only one of which answered to the pointer.
        */
-      const { canvas } = await renderPageCanvas(this.ws, page, {
+      /*
+       * While cropping, the page is drawn uncropped.
+       *
+       * The rectangle can be dragged outwards as well as in, and a page already
+       * showing only its cropped part gives it nowhere to go — the trim would be
+       * a one-way door.
+       */
+      const cropping = this.editMode === 'crop' && page.id === this.currentPageId;
+      const subject = cropping ? { ...page, crop: null } : page;
+
+      const { canvas } = await renderPageCanvas(this.ws, subject, {
         scale: pixelScale,
         withAnnots: false,
       });

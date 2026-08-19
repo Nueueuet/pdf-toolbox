@@ -1161,6 +1161,54 @@ test('text is selectable in reading order, whatever order the file stores it in'
   }
 });
 
+test('cropping trims the page without moving the view', async () => {
+  /*
+   * The page genuinely becomes smaller, and everything below it shifts up. What
+   * must not happen is the document jumping to the top and appearing to have
+   * zoomed out, when all that was asked for was to trim one page.
+   */
+  const ws = await loadWorkspace(['report.pdf']);
+  const host = document.createElement('div');
+  host.className = 'viewer';
+  host.style.cssText = 'position:fixed;left:0;top:0;width:800px;height:600px;opacity:0;z-index:9999';
+  document.body.appendChild(host);
+
+  const viewer = new PageViewer(host, ws, {});
+  try {
+    // Settled before measuring: setLayout and open each start a render, and
+    // reading a position while one is still landing measures nothing useful.
+    viewer.setLayout('continuous');
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const page = ws.pages[2];
+    await viewer.open(page);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    viewer.setZoom(1);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+
+    const place = () => {
+      const frame = host.querySelector(`.viewer__page[data-id="${page.id}"]`);
+      const box = frame.getBoundingClientRect();
+      const view = viewer.scroller.getBoundingClientRect();
+      return { top: box.top - view.top, width: box.width, zoom: viewer.effectiveZoom() };
+    };
+
+    const before = place();
+    page.crop = { left: 0.06, top: 0.06, right: 0.94, bottom: 0.94 };
+    await viewer.rebind(page);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const after = place();
+
+    assert(Math.abs(after.zoom - before.zoom) < 0.001,
+      `the zoom changed from ${before.zoom} to ${after.zoom}`);
+    assert(Math.abs(after.top - before.top) < 6,
+      `the page moved from ${Math.round(before.top)}px down the window to ${Math.round(after.top)}px`);
+    assert(after.width < before.width - 10, 'the crop did not actually trim the page');
+  } finally {
+    viewer.destroy();
+    host.remove();
+  }
+});
+
 test('a wide sheet can be panned past all four of its edges', async () => {
   const ws = await loadWorkspace(['blueprint.pdf']);
   const host = document.createElement('div');

@@ -321,13 +321,6 @@ const write = {
 
     return h('div',
       section(null, buttonRow(primary('Add text box', { onclick: add }))),
-      section('Counting',
-        buttonRow(...COUNTER_KINDS.map(({ key, label }) => button(`{${key}}`, {
-          title: label,
-          onclick: () => insertCounter(key),
-        }))),
-        hint('Puts a mark in the box that counts up as it is copied across pages: {n} for 1, 2, 3, {a} or {A} for letters, {i} or {I} for roman numerals. Where it starts, and how far it steps, is asked when you copy.'),
-      ),
       section('The page’s own text',
         buttonRow(button('Take over some text…', { onclick: retype })),
         hint('Covers a run of the page’s text and puts an editable box in its place, at the same position, size and colour. The letters are redrawn in the nearest standard font: the original is embedded in the file as only the characters it already uses, so nothing new can be typed in it.'),
