@@ -375,6 +375,11 @@ export class AnnotationLayer {
     return normalizeCrop(this.pendingCrop);
   }
 
+  /** Where the crop rectangle sits in the window, for holding the view on it. */
+  cropBox() {
+    return this.el.querySelector('.crop')?.getBoundingClientRect() ?? null;
+  }
+
   setCrop(crop) {
     this.pendingCrop = crop ? { ...crop } : null;
     this.draw();

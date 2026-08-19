@@ -421,8 +421,15 @@ export function normalizeQuarter(deg) {
 /** Effective on-screen size of a page in points, after rotation and cropping. */
 export function pageSize(page) {
   const crop = page.crop;
+  /*
+   * A crop is stored the way it is drawn — down the page from the top — so its
+   * height is bottom minus top. Subtracting the other way round gave every
+   * cropped page a negative height, which a frame cannot be given: it fell back
+   * to standing as tall as the picture inside it, which looked right while
+   * quietly leaving the layout to work from the wrong number.
+   */
   let w = page.base.w * (crop ? crop.right - crop.left : 1);
-  let h = page.base.h * (crop ? crop.top - crop.bottom : 1);
+  let h = page.base.h * (crop ? crop.bottom - crop.top : 1);
   const quarter = normalizeQuarter(page.base.rotate + page.rotate);
   if (quarter % 180 === 90) [w, h] = [h, w];
   return { w, h, quarter };

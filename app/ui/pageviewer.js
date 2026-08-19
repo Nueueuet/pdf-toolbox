@@ -240,10 +240,13 @@ export class PageViewer {
     if (!page) return;
     this.currentPageId = page.id;
 
+    const asked = this.pendingAnchor?.pageId === page.id ? this.pendingAnchor.top : null;
+    this.pendingAnchor = null;
+
     const anchor = this.frames.get(page.id);
-    const offset = anchor
+    const offset = asked ?? (anchor
       ? anchor.getBoundingClientRect().top - this.scroller.getBoundingClientRect().top
-      : null;
+      : null);
 
     // Told not to scroll to the page on its way through: render() otherwise puts
     // it at the top of the window first, and anchoring on top of that is one
@@ -257,6 +260,34 @@ export class PageViewer {
     // Sideways it is centred, which for a page that just changed width is the
     // only place that reads as "the same page, trimmed".
     this.scroller.scrollLeft = (this.scroller.scrollWidth - this.scroller.clientWidth) / 2;
+
+    /*
+     * A last check that the page is still somewhere you can see it.
+     *
+     * Holding a page where it was assumes it stayed roughly the size it was. A
+     * crop down to one corner does not: keeping its top where it sat left the
+     * whole of what remained above the window, so the document read as having
+     * scrolled itself down past the page just worked on.
+     */
+    const box = settled.getBoundingClientRect();
+    const view = this.scroller.getBoundingClientRect();
+    if (box.bottom < view.top + 24 || box.top > view.bottom - 24) this.scrollToPage(page.id, 'auto');
+  }
+
+  /**
+   * Holds the crop rectangle still while the crop is applied.
+   *
+   * What is left of the page afterwards is exactly what the rectangle covers,
+   * so the rectangle's own place in the window is where the trimmed page
+   * belongs — anywhere else and the crop appears to jump the moment it lands.
+   */
+  anchorOnCrop() {
+    const box = this.layer?.cropBox();
+    if (!box) return;
+    this.pendingAnchor = {
+      pageId: this.currentPageId,
+      top: box.top - this.scroller.getBoundingClientRect().top,
+    };
   }
 
   async render({ keepScroll = false } = {}) {
@@ -286,8 +317,24 @@ export class PageViewer {
     if (token === this.renderToken) this.handlers.onZoomChange?.(this.effectiveZoom(), this.zoom === null);
   }
 
+  /** True while this page is the one the crop rectangle is sitting on. */
+  cropping(page) {
+    return this.editMode === 'crop' && page.id === this.currentPageId;
+  }
+
+  /**
+   * What the page shows right now, which is not always what it will export as.
+   *
+   * The page being cropped is shown whole, rectangle and all. Shown trimmed, the
+   * frame has nowhere to be dragged outwards to and a crop could only ever get
+   * smaller — a one-way door.
+   */
+  sizeOf(page) {
+    return pageSize(this.cropping(page) ? { ...page, crop: null } : page);
+  }
+
   frame(page) {
-    const { w, h: ph } = pageSize(page);
+    const { w, h: ph } = this.sizeOf(page);
     /*
      * Every page carries its own editing layer, so a text box is edited on the
      * page it belongs to rather than on whichever page a separate editor decided
@@ -338,10 +385,50 @@ export class PageViewer {
    */
   setCurrentPage(id) {
     if (id === this.currentPageId || !this.ws.pageById(id)) return;
+    const was = this.currentPageId;
     this.currentPageId = id;
     this.applyEditMode();
+    // The rectangle moved to another page, so the one it left goes back to
+    // showing its trimmed self and the one it arrived at opens out.
+    if (this.editMode === 'crop') {
+      this.reframe(was);
+      this.reframe(id);
+    }
     this.syncNav();
     this.handlers.onPageChange?.(this.ws.pageById(id));
+  }
+
+  /**
+   * Puts one frame back in step with what its page should show.
+   *
+   * Entering or leaving crop changes a page's size on screen, and the view is
+   * held on the part of it you were already looking at: without that, opening
+   * Crop on an already-trimmed page would drop the rest of the page in above
+   * whatever you were reading and shove it down the window.
+   */
+  reframe(id) {
+    const frame = this.frames.get(id);
+    const page = this.ws.pageById(id);
+    if (!frame || !page) return;
+
+    const view = this.scroller.getBoundingClientRect().top;
+    const before = frame.getBoundingClientRect();
+    const kept = page.crop?.top ?? 0;
+    // Where the top of the visible part of the page sits, whichever of the two
+    // the frame is showing at the time.
+    const wasWhole = Number(frame.dataset.h) === pageSize({ ...page, crop: null }).h;
+    const anchor = before.top - view + (wasWhole ? kept * before.height : 0);
+
+    const { w, h } = this.sizeOf(page);
+    frame.dataset.w = String(w);
+    frame.dataset.h = String(h);
+    frame.dataset.needsRedraw = '1';
+    this.relayout();
+
+    const after = frame.getBoundingClientRect();
+    const now = after.top - view + (this.cropping(page) ? kept * after.height : 0);
+    this.scroller.scrollTop += now - anchor;
+    this.paint(frame, id);
   }
 
   /**
@@ -356,14 +443,9 @@ export class PageViewer {
     this.root.dataset.mode = mode;
     this.applyEditMode();
 
-    // Entering or leaving crop changes what the page shows, so it is redrawn.
-    if ((was === 'crop') !== (mode === 'crop')) {
-      const frame = this.frames.get(this.currentPageId);
-      if (frame) {
-        delete frame.dataset.drawnScale;
-        this.paint(frame, this.currentPageId);
-      }
-    }
+    // Entering or leaving crop changes what the page shows, so it is resized
+    // and redrawn.
+    if ((was === 'crop') !== (mode === 'crop')) this.reframe(this.currentPageId);
   }
 
   applyEditMode() {
@@ -399,16 +481,8 @@ export class PageViewer {
 
     for (const [kind, boxes] of groups) {
       for (const box of boxes) {
-        /*
-         * Slivers are skipped.
-         *
-         * A PDF is full of runs with nothing in them — positioning marks, empty
-         * table cells, the odd stray space — and a box drawn round each of those
-         * is a mark on the page with nothing under it to explain it. Down the
-         * outer margin of a form they line up into a dotted edge that looks like
-         * recognition gone wrong.
-         */
-        if (box.w < 0.004 || box.h < 0.003) continue;
+        // Nothing to draw a box around.
+        if (box.w <= 0 || box.h <= 0) continue;
         host.appendChild(h(`div.inspectbox.inspectbox--${kind}`, {
           style: {
             left: `${box.x * 100}%`,
@@ -549,6 +623,7 @@ export class PageViewer {
   refreshText(annot) { this.layer?.refreshText(annot); }
   syncAnnot(annot) { this.layer?.syncAnnot(annot); }
   currentCrop() { return this.layer?.currentCrop() ?? null; }
+  cropBox() { return this.layer?.cropBox() ?? null; }
   setCrop(crop) { this.layer?.setCrop(crop); }
 
   /**
@@ -657,7 +732,14 @@ export class PageViewer {
   }
 
   async paint(frame, id) {
-    if (frame.dataset.painting === '1') return;
+    // Asked for again mid-draw, it is drawn again afterwards rather than
+    // dropped. Entering crop asks for a redraw of a page that is very often
+    // still being drawn, and losing that request left the trimmed picture
+    // stretched over the full-size frame.
+    if (frame.dataset.painting === '1') {
+      frame.dataset.needsRedraw = '1';
+      return;
+    }
     if (frame.dataset.drawnScale && frame.dataset.needsRedraw !== '1') return;
 
     const page = this.ws.pageById(id);
@@ -701,6 +783,7 @@ export class PageViewer {
       if (err?.name !== 'RenderingCancelledException') console.error('viewer paint failed', err);
     } finally {
       delete frame.dataset.painting;
+      if (frame.dataset.needsRedraw === '1' && frame.isConnected) this.paint(frame, id);
     }
   }
 

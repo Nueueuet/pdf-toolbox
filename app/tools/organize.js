@@ -11,7 +11,7 @@ import { renderPageCanvas } from '../core/render.js';
 import { normalizeQuarter } from '../core/workspace.js';
 import { normalizeCrop } from '../core/geometry.js';
 import { baseName } from '../util/format.js';
-import { fillCounter, hasCounter } from '../core/counter.js';
+import { fillCounter, hasCounter, COUNTER_KINDS, markKind, setMarkKind } from '../core/counter.js';
 import { progressToast, toast } from '../ui/toast.js';
 
 /**
@@ -186,7 +186,11 @@ const split = {
      */
     const numbering = checkbox({ label: 'Number the parts', checked: false });
     const pattern = textInput({ value: `${baseName(ctx.ws.name)} {n}`, placeholder: 'bild {n}' });
-    const numberFrom = textInput({ value: '1', placeholder: '1' });
+    const counterKind = select({
+      value: 'n',
+      options: COUNTER_KINDS.map(({ key, label }) => ({ value: key, label })),
+    });
+    const numberFrom = textInput({ value: '1', placeholder: '1 or a' });
     const numberStep = numberInput({ value: 1, min: 1, max: 999 });
 
     const defaultName = (index) => `${baseName(ctx.ws.name)} cut ${index + 1}.pdf`;
@@ -194,7 +198,7 @@ const split = {
     const nameFor = (index) => {
       if (numbering.checked) {
         const text = pattern.value.trim() || `${baseName(ctx.ws.name)} {n}`;
-        const filled = fillCounter(hasCounter(text) ? text : `${text} {n}`, index, {
+        const filled = fillCounter(hasCounter(text) ? text : setMarkKind(text, counterKind.value), index, {
           start: numberFrom.value.trim() || '1',
           step: Math.max(1, numberStep.valueAsNumber || 1),
         });
@@ -233,14 +237,26 @@ const split = {
     };
 
     const numberingFields = h('div.numbering',
-      field('Pattern', pattern, '{n} is where the number goes: 1, 2, 3. {a} or {A} for letters, {i} or {I} for roman numerals. Left out entirely, it is added at the end.'),
+      field('Pattern', pattern, 'The braces are where the count goes. Left out entirely, it is added at the end.'),
+      field('Count in', counterKind),
       h('div.grid2', field('Start at', numberFrom), field('Count up by', numberStep)),
+      hint('Counting in letters runs a, b, c … z, then aa, ab, ac. Start at a letter — “c” starts at c — and counting up by 2 gives a, c, e.'),
     );
     numberingFields.hidden = true;
 
     numbering.addEventListener('change', () => {
       numberingFields.hidden = !numbering.checked;
       renderPreview();
+    });
+    // The choice and the pattern are two views of the same thing: picking
+    // letters rewrites the mark, and typing one by hand moves the choice.
+    counterKind.addEventListener('change', () => {
+      pattern.value = setMarkKind(pattern.value, counterKind.value);
+      renderPreview();
+    });
+    pattern.addEventListener('input', () => {
+      const kind = markKind(pattern.value);
+      if (kind) counterKind.value = kind;
     });
     for (const control of [pattern, numberFrom, numberStep]) {
       control.addEventListener('input', renderPreview);
@@ -566,6 +582,9 @@ const crop = {
       const pages = targets();
       if (!pages) return;
       if (!box) return toast('The frame covers the whole page — nothing to crop', { tone: 'error' });
+      // What the rectangle covers is what will be left, so the view is held on
+      // the rectangle: the crop lands where you were already looking.
+      ctx.editor.anchorOnCrop?.();
       ctx.commit('Crop', () => {
         for (const page of pages) page.crop = { ...box };
       });

@@ -31,6 +31,29 @@ export function hasCounter(text) {
   return MARK.test(String(text ?? ''));
 }
 
+/** Which of the five a pattern is counting in, or null if it counts in none. */
+export function markKind(text) {
+  MARK.lastIndex = 0;
+  return MARK.exec(String(text ?? ''))?.[1] ?? null;
+}
+
+/**
+ * Switches a pattern from counting one way to counting another.
+ *
+ * Numbers and letters are the same job written differently, so choosing between
+ * them is a choice, not a rewrite: the pattern keeps its words and its starting
+ * offset, and only the mark inside the braces changes. A pattern with no mark at
+ * all gains one at the end, which is where a name that has run out of room for
+ * one wants it.
+ */
+export function setMarkKind(text, kind) {
+  const source = String(text ?? '');
+  if (!KINDS[kind]) return source;
+  if (!hasCounter(source)) return `${source.trimEnd()} {${kind}}`.trim();
+  MARK.lastIndex = 0;
+  return source.replace(MARK, (whole, was, offset) => `{${kind}${offset ? `+${offset}` : ''}}`);
+}
+
 /**
  * Fills the marks in for the `index`-th copy.
  *

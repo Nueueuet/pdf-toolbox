@@ -96,21 +96,53 @@ export async function existingTextBoxes(ws, page) {
   const boxes = [];
   for (const item of content.items) {
     if (!item.str || !item.str.trim()) continue;
-    const height = Math.abs(item.transform[3]) || item.height || 10;
-    const width = item.width || item.str.length * height * 0.5;
-    const x = item.transform[4];
-    const y = item.transform[5];
 
-    // The item sits on its baseline, so the box runs from a little below it to
-    // the ascender height above.
-    const [ax, ay] = viewport.convertToViewportPoint(x, y - height * 0.25);
-    const [bx, by] = viewport.convertToViewportPoint(x + width, y + height);
+    /*
+     * A run is measured along its own two directions, not along the page's.
+     *
+     * `width` is how far the run advances in the direction it is written, which
+     * for most text is straight across the page and for some text is not: a
+     * watermark set at 45 degrees, or a label printed up the left margin of a
+     * form. Adding that advance to x regardless drew the box along the bottom of
+     * the page instead of along the words — a diagonal watermark came out as a
+     * bar wider than the page itself, and a column of upright labels came out as
+     * a stripe down the margin. Those bars are what appeared as marks around the
+     * edge of the page, and where one of them lay across the page it also told
+     * the recogniser that everything underneath already had text, so that part
+     * was skipped.
+     */
+    const [a, b, c, d, e, f] = item.transform;
+    const rise = Math.hypot(c, d) || item.height || 10;
+    const along = Math.hypot(a, b) || rise;
+    // Unit vectors: along the writing, and up the glyphs.
+    const ux = a / along;
+    const uy = b / along;
+    const vx = c / rise;
+    const vy = d / rise;
+    const width = item.width || item.str.length * rise * 0.5;
+
+    // The run sits on its baseline, so the box starts a little below it and
+    // reaches the ascender height above.
+    const dropX = e - vx * rise * 0.25;
+    const dropY = f - vy * rise * 0.25;
+    const tall = rise * 1.25;
+    const corners = [
+      [dropX, dropY],
+      [dropX + ux * width, dropY + uy * width],
+      [dropX + vx * tall, dropY + vy * tall],
+      [dropX + ux * width + vx * tall, dropY + uy * width + vy * tall],
+    ].map(([px, py]) => viewport.convertToViewportPoint(px, py));
+
+    const xs = corners.map(([px]) => px);
+    const ys = corners.map(([, py]) => py);
+    const left = Math.min(...xs);
+    const top = Math.min(...ys);
 
     boxes.push({
-      x: Math.min(ax, bx) / mapper.displayWidth,
-      y: Math.min(ay, by) / mapper.displayHeight,
-      w: Math.abs(bx - ax) / mapper.displayWidth,
-      h: Math.abs(by - ay) / mapper.displayHeight,
+      x: left / mapper.displayWidth,
+      y: top / mapper.displayHeight,
+      w: (Math.max(...xs) - left) / mapper.displayWidth,
+      h: (Math.max(...ys) - top) / mapper.displayHeight,
     });
   }
   return boxes;

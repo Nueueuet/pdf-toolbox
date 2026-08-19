@@ -18,15 +18,15 @@ import { parseRange, formatRange } from '../app/util/ranges.js';
 import { primeFontMetrics } from '../app/core/fonts.js';
 import { PageGrid } from '../app/ui/pagegrid.js';
 import { PageViewer } from '../app/ui/pageviewer.js';
-import { analysePage } from '../app/core/coverage.js';
+import { analysePage, existingTextBoxes } from '../app/core/coverage.js';
 import { ocrAvailable, ocrPage } from '../app/core/ocr.js';
 import { ocrLines } from '../app/ui/ocrlayer.js';
 import { readableRuns, coloursOf } from '../app/core/retype.js';
-import { fillCounter, hasCounter } from '../app/core/counter.js';
+import { fillCounter, hasCounter, markKind, setMarkKind } from '../app/core/counter.js';
 import {
   targetOf, nameFromUrl, supported, turnOn, turnOff, reconcile, diagnose, looksLikePdf, workspaceFor,
 } from '../app/core/intercept.js';
-import { PDFDocument, StandardFonts } from '../vendor/pdf-lib.esm.js';
+import { PDFDocument, StandardFonts, degrees } from '../vendor/pdf-lib.esm.js';
 import * as pdfjsLib from '../vendor/pdf.mjs';
 
 const tests = [];
@@ -1090,6 +1090,24 @@ test('a counting mark carries on across the copies', async () => {
 
   // Letters roll over the way spreadsheet columns do rather than stopping at z.
   assert(fillCounter('{A}', 26, { start: 1 }) === 'AA', `26 letters on gave ${fillCounter('{A}', 26, { start: 1 })}`);
+  assert(run('bild {a}', { start: 'a', step: 2 }).join() === 'bild a,bild c,bild e,bild g',
+    'letters counting up in twos');
+  assert(fillCounter('{a}', 25, { start: 'a' }) === 'z' && fillCounter('{a}', 26, { start: 'a' }) === 'aa',
+    'letters should carry on past z');
+});
+
+test('counting in numbers or in letters is one choice, not two patterns', async () => {
+  /*
+   * The mark is the only difference between the two, so choosing between them
+   * keeps the words that were typed around it — and a name with no mark at all
+   * gains one rather than being ignored.
+   */
+  assert(markKind('bild {n}') === 'n', 'the mark was not read back');
+  assert(markKind('bild 1') === null, 'plain text was taken for a mark');
+  assert(setMarkKind('bild {n}', 'a') === 'bild {a}', 'switching to letters');
+  assert(setMarkKind('sheet {n+2} of many', 'A') === 'sheet {A+2} of many', 'the offset is kept');
+  assert(setMarkKind('bild', 'a') === 'bild {a}', 'a pattern with no mark gains one');
+  assert(markKind(setMarkKind('bild', 'i')) === 'i', 'the added mark reads back');
 });
 
 test('text is selectable in reading order, whatever order the file stores it in', async () => {
@@ -1204,6 +1222,113 @@ test('cropping trims the page without moving the view', async () => {
       `the page moved from ${Math.round(before.top)}px down the window to ${Math.round(after.top)}px`);
     assert(after.width < before.width - 10, 'the crop did not actually trim the page');
   } finally {
+    viewer.destroy();
+    host.remove();
+  }
+});
+
+test('a cropped page reports the size it is drawn at', async () => {
+  // Everything that lays pages out asks pageSize how big they are, so a wrong
+  // answer here is a wrong answer everywhere at once.
+  const ws = await loadWorkspace(['report.pdf']);
+  const page = ws.pages[0];
+  page.crop = { left: 0.1, top: 0.55, right: 0.7, bottom: 0.75 };
+  try {
+    const size = pageSize(page);
+    assert(size.h > 0, `a cropped page came out ${size.h.toFixed(1)} points tall`);
+    const { canvas } = await renderPageCanvas(ws, page, { scale: 1 });
+    near(size.w, canvas.width, 1.5, 'cropped width');
+    near(size.h, canvas.height, 1.5, 'cropped height');
+  } finally {
+    page.crop = null;
+  }
+});
+
+test('a run set at an angle is boxed along the words, not across the page', async () => {
+  /*
+   * Where a run is boxed decides two things: what the inspection overlay draws,
+   * and which ink the recogniser is told already has text over it. Measuring a
+   * run's advance along the page instead of along the writing turned a label
+   * printed up the margin into a stripe down the edge of the page, and a
+   * watermark set at 45 degrees into a bar wider than the page.
+   */
+  const doc = await PDFDocument.create();
+  const sheet = doc.addPage([595, 842]);
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  sheet.drawText('Ubertrag aus Beiblattern', { x: 60, y: 300, size: 9, font, rotate: degrees(90) });
+  sheet.drawText('unverbindlicher Einzelblattausdruck', { x: 60, y: 160, size: 28, font, rotate: degrees(45) });
+  sheet.drawText('an ordinary line', { x: 60, y: 700, size: 11, font });
+  const bytes = await doc.save();
+
+  const ws = new Workspace();
+  const added = await ws.addFiles([new File([bytes], 'angled.pdf', { type: 'application/pdf' })]);
+  assert(added.every((r) => r.ok), 'the angled sample should load');
+
+  const boxes = await existingTextBoxes(ws, ws.pages[0]);
+  assert(boxes.length >= 3, `expected all three runs, got ${boxes.length}`);
+  for (const box of boxes) {
+    assert(box.x >= -0.01 && box.y >= -0.01 && box.x + box.w <= 1.01 && box.y + box.h <= 1.01,
+      `a box ran off the page: x ${box.x.toFixed(2)} w ${box.w.toFixed(2)} y ${box.y.toFixed(2)} h ${box.h.toFixed(2)}`);
+  }
+  assert(boxes.some((box) => box.h > box.w * 2),
+    'the label printed up the margin should be boxed taller than it is wide');
+  assert(boxes.some((box) => box.w > box.h * 2 && box.w < 0.5),
+    'the ordinary line should still be boxed as a line');
+});
+
+test('a deep crop lands where the rectangle was', async () => {
+  /*
+   * Holding the page's own top still is only right while it stays roughly the
+   * size it was. Cropped down to one corner from halfway down the page, that
+   * left everything remaining above the window: the document read as having
+   * scrolled itself past the page just worked on. What is left is exactly what
+   * the rectangle covered, so the rectangle's place in the window is where it
+   * belongs.
+   */
+  const ws = await loadWorkspace(['report.pdf']);
+  const host = document.createElement('div');
+  host.className = 'viewer';
+  host.style.cssText = 'position:fixed;left:0;top:0;width:800px;height:600px;opacity:0;z-index:9999';
+  document.body.appendChild(host);
+
+  const viewer = new PageViewer(host, ws, {});
+  try {
+    viewer.setLayout('continuous');
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const page = ws.pages[2];
+    await viewer.open(page);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    viewer.setZoom(1);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    // Scrolled into the page, the way anyone cropping something has to be.
+    viewer.scroller.scrollTop += 300;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    const crop = { left: 0.1, top: 0.55, right: 0.7, bottom: 0.75 };
+    viewer.setEditMode('crop');
+    viewer.setCrop(crop);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    const view = viewer.scroller.getBoundingClientRect();
+    const rect = viewer.cropBox();
+    assert(rect, 'the crop rectangle should be on the page');
+    const wanted = rect.top - view.top;
+
+    viewer.anchorOnCrop();
+    page.crop = crop;
+    await viewer.rebind(page);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    const box = host.querySelector(`.viewer__page[data-id="${page.id}"]`).getBoundingClientRect();
+    const now = viewer.scroller.getBoundingClientRect();
+    const top = box.top - now.top;
+    assert(box.bottom > now.top && box.top < now.bottom,
+      `the cropped page ended up outside the window, at ${Math.round(top)}px`);
+    assert(Math.abs(top - wanted) < 8,
+      `the crop was at ${Math.round(wanted)}px and landed at ${Math.round(top)}px`);
+  } finally {
+    viewer.setEditMode('select');
+    ws.pages[2].crop = null;
     viewer.destroy();
     host.remove();
   }
