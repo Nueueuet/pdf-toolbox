@@ -99,6 +99,27 @@ export function unitScale(viewport) {
   return 1 / (viewport.scale || 1);
 }
 
+/**
+ * A crop drawn on a page that is already cropped.
+ *
+ * The rectangle is drawn on what the page shows, and what a page shows is
+ * already its crop window, so a second crop is measured inside the first rather
+ * than against the whole sheet. Without this, trimming a little more off a page
+ * that had been trimmed once would jump to some quite different part of it.
+ */
+export function composeCrop(existing, rect) {
+  if (!rect) return existing ?? null;
+  if (!existing) return { ...rect };
+  const w = existing.right - existing.left;
+  const h = existing.bottom - existing.top;
+  return {
+    left: existing.left + rect.left * w,
+    right: existing.left + rect.right * w,
+    top: existing.top + rect.top * h,
+    bottom: existing.top + rect.bottom * h,
+  };
+}
+
 /** Clamps a crop rectangle to the page and keeps a minimum size. */
 export function normalizeCrop(crop) {
   if (!crop) return null;

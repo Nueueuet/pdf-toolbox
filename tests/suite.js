@@ -15,6 +15,7 @@ import { wrapText } from '../app/core/fonts.js';
 import { pageSize } from '../app/core/workspace.js';
 import { extractRows, toCsv } from '../app/core/text.js';
 import { parseRange, formatRange } from '../app/util/ranges.js';
+import { composeCrop } from '../app/core/geometry.js';
 import { primeFontMetrics } from '../app/core/fonts.js';
 import { PageGrid } from '../app/ui/pagegrid.js';
 import { PageViewer } from '../app/ui/pageviewer.js';
@@ -1240,6 +1241,53 @@ test('a cropped page reports the size it is drawn at', async () => {
     near(size.w, canvas.width, 1.5, 'cropped width');
     near(size.h, canvas.height, 1.5, 'cropped height');
   } finally {
+    page.crop = null;
+  }
+});
+
+test('a second crop is measured inside the first', async () => {
+  /*
+   * The rectangle is drawn on what the page shows, and what it shows is already
+   * its crop window. Read against the whole sheet instead, trimming a little
+   * more off a trimmed page jumps to a quite different part of it.
+   */
+  const half = { left: 0.5, top: 0.5, right: 1, bottom: 1 };
+  const again = composeCrop(half, { left: 0.5, top: 0.5, right: 1, bottom: 1 });
+  near(again.left, 0.75, 0.0001, 'left of the second crop');
+  near(again.top, 0.75, 0.0001, 'top of the second crop');
+  near(again.right, 1, 0.0001, 'right of the second crop');
+  assert(composeCrop(null, half).left === 0.5, 'the first crop on a whole page is itself');
+
+  // And what it means on a real page: two halves in a row leave a quarter.
+  const ws = await loadWorkspace(['report.pdf']);
+  const page = ws.pages[0];
+  try {
+    page.crop = half;
+    const once = pageSize(page);
+    page.crop = again;
+    const twice = pageSize(page);
+    near(twice.w, once.w / 2, 1, 'width after the second crop');
+    near(twice.h, once.h / 2, 1, 'height after the second crop');
+  } finally {
+    page.crop = null;
+  }
+});
+
+test('a turned page is cropped along the sides it is shown on', async () => {
+  // The rectangle is drawn on the page as it appears, so its sides are
+  // fractions of the turned page. Cropping the unturned one and swapping
+  // afterwards puts the width fraction on the height.
+  const ws = await loadWorkspace(['report.pdf']);
+  const page = ws.pages[0];
+  page.rotate = 90;
+  page.crop = { left: 0, top: 0, right: 0.5, bottom: 1 };
+  try {
+    const size = pageSize(page);
+    const { canvas } = await renderPageCanvas(ws, page, { scale: 1 });
+    near(size.w, canvas.width, 1.5, 'width of a turned, cropped page');
+    near(size.h, canvas.height, 1.5, 'height of a turned, cropped page');
+  } finally {
+    page.rotate = 0;
     page.crop = null;
   }
 });

@@ -9,7 +9,7 @@ import { buildPdf } from '../core/export.js';
 import { saveMany } from '../core/download.js';
 import { renderPageCanvas } from '../core/render.js';
 import { normalizeQuarter } from '../core/workspace.js';
-import { normalizeCrop } from '../core/geometry.js';
+import { normalizeCrop, composeCrop } from '../core/geometry.js';
 import { baseName } from '../util/format.js';
 import { fillCounter, hasCounter, COUNTER_KINDS, markKind, setMarkKind } from '../core/counter.js';
 import { progressToast, toast } from '../ui/toast.js';
@@ -246,6 +246,18 @@ const split = {
 
     numbering.addEventListener('change', () => {
       numberingFields.hidden = !numbering.checked;
+      /*
+       * Switching numbering back on always brings the mark back with it.
+       *
+       * Without this, deleting the braces once left the pattern with nothing to
+       * count in — and since a pattern with no mark gets one added at the end,
+       * turning the switch off and on again silently kept naming every part the
+       * same. Coming back to a switch that has just been turned on, what is
+       * wanted is a pattern that counts.
+       */
+      if (numbering.checked && !hasCounter(pattern.value)) {
+        pattern.value = setMarkKind(pattern.value.trim() || baseName(ctx.ws.name), counterKind.value);
+      }
       renderPreview();
     });
     // The choice and the pattern are two views of the same thing: picking
@@ -586,8 +598,13 @@ const crop = {
       // the rectangle: the crop lands where you were already looking.
       ctx.editor.anchorOnCrop?.();
       ctx.commit('Crop', () => {
-        for (const page of pages) page.crop = { ...box };
+        // Measured inside whatever the page already shows, so trimming a little
+        // more off an already trimmed page takes it off where you drew it.
+        for (const page of pages) page.crop = composeCrop(page.crop, box);
       });
+      // The rectangle belonged to the page as it was; the page is now the part
+      // it covered, so it goes back to the whole of what is left.
+      ctx.editor.setCrop(null);
       toast(`Cropped ${pages.length} ${pages.length === 1 ? 'page' : 'pages'}`, { tone: 'success' });
     };
 

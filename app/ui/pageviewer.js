@@ -317,24 +317,8 @@ export class PageViewer {
     if (token === this.renderToken) this.handlers.onZoomChange?.(this.effectiveZoom(), this.zoom === null);
   }
 
-  /** True while this page is the one the crop rectangle is sitting on. */
-  cropping(page) {
-    return this.editMode === 'crop' && page.id === this.currentPageId;
-  }
-
-  /**
-   * What the page shows right now, which is not always what it will export as.
-   *
-   * The page being cropped is shown whole, rectangle and all. Shown trimmed, the
-   * frame has nowhere to be dragged outwards to and a crop could only ever get
-   * smaller — a one-way door.
-   */
-  sizeOf(page) {
-    return pageSize(this.cropping(page) ? { ...page, crop: null } : page);
-  }
-
   frame(page) {
-    const { w, h: ph } = this.sizeOf(page);
+    const { w, h: ph } = pageSize(page);
     /*
      * Every page carries its own editing layer, so a text box is edited on the
      * page it belongs to rather than on whichever page a separate editor decided
@@ -385,50 +369,10 @@ export class PageViewer {
    */
   setCurrentPage(id) {
     if (id === this.currentPageId || !this.ws.pageById(id)) return;
-    const was = this.currentPageId;
     this.currentPageId = id;
     this.applyEditMode();
-    // The rectangle moved to another page, so the one it left goes back to
-    // showing its trimmed self and the one it arrived at opens out.
-    if (this.editMode === 'crop') {
-      this.reframe(was);
-      this.reframe(id);
-    }
     this.syncNav();
     this.handlers.onPageChange?.(this.ws.pageById(id));
-  }
-
-  /**
-   * Puts one frame back in step with what its page should show.
-   *
-   * Entering or leaving crop changes a page's size on screen, and the view is
-   * held on the part of it you were already looking at: without that, opening
-   * Crop on an already-trimmed page would drop the rest of the page in above
-   * whatever you were reading and shove it down the window.
-   */
-  reframe(id) {
-    const frame = this.frames.get(id);
-    const page = this.ws.pageById(id);
-    if (!frame || !page) return;
-
-    const view = this.scroller.getBoundingClientRect().top;
-    const before = frame.getBoundingClientRect();
-    const kept = page.crop?.top ?? 0;
-    // Where the top of the visible part of the page sits, whichever of the two
-    // the frame is showing at the time.
-    const wasWhole = Number(frame.dataset.h) === pageSize({ ...page, crop: null }).h;
-    const anchor = before.top - view + (wasWhole ? kept * before.height : 0);
-
-    const { w, h } = this.sizeOf(page);
-    frame.dataset.w = String(w);
-    frame.dataset.h = String(h);
-    frame.dataset.needsRedraw = '1';
-    this.relayout();
-
-    const after = frame.getBoundingClientRect();
-    const now = after.top - view + (this.cropping(page) ? kept * after.height : 0);
-    this.scroller.scrollTop += now - anchor;
-    this.paint(frame, id);
   }
 
   /**
@@ -438,14 +382,9 @@ export class PageViewer {
    * rectangle; annotations belong to every page and are drawn on all of them.
    */
   setEditMode(mode) {
-    const was = this.editMode;
     this.editMode = mode;
     this.root.dataset.mode = mode;
     this.applyEditMode();
-
-    // Entering or leaving crop changes what the page shows, so it is resized
-    // and redrawn.
-    if ((was === 'crop') !== (mode === 'crop')) this.reframe(this.currentPageId);
   }
 
   applyEditMode() {
@@ -758,17 +697,7 @@ export class PageViewer {
        * until the next repaint caught up — one text box, two apparent copies,
        * only one of which answered to the pointer.
        */
-      /*
-       * While cropping, the page is drawn uncropped.
-       *
-       * The rectangle can be dragged outwards as well as in, and a page already
-       * showing only its cropped part gives it nowhere to go — the trim would be
-       * a one-way door.
-       */
-      const cropping = this.editMode === 'crop' && page.id === this.currentPageId;
-      const subject = cropping ? { ...page, crop: null } : page;
-
-      const { canvas } = await renderPageCanvas(this.ws, subject, {
+      const { canvas } = await renderPageCanvas(this.ws, page, {
         scale: pixelScale,
         withAnnots: false,
       });
