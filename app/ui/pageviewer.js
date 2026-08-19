@@ -254,6 +254,7 @@ export class PageViewer {
 
     this.relayout();
     this.applyEditMode();
+    for (const [id, frame] of this.frames) this.drawInspection(frame, this.ws.pageById(id));
     this.syncNav();
     if (this.layout === 'continuous') this.scrollToPage(this.currentPageId, 'auto');
     if (token === this.renderToken) this.handlers.onZoomChange?.(this.effectiveZoom(), this.zoom === null);
@@ -271,6 +272,9 @@ export class PageViewer {
     const frame = h('div.viewer__page', { dataset: { id: page.id, w: String(w), h: String(ph) } },
       h('div.viewer__canvas'),
       h('div.textlayer'),
+      // Above the page and below the annotations: it is a check on what OCR
+      // read, so it has to be visible over the ink it claims to describe.
+      h('div.inspectlayer'),
       overlay,
       h('span.viewer__number', String(this.ws.indexOf(page.id) + 1)),
     );
@@ -329,6 +333,46 @@ export class PageViewer {
   applyEditMode() {
     for (const [id, layer] of this.layers) {
       layer.setMode(this.editMode === 'crop' && id === this.currentPageId ? 'crop' : 'select');
+    }
+  }
+
+  /**
+   * Colours what OCR added against what the PDF already carried.
+   *
+   * On every page on show, not just one: in a continuous stack the whole point
+   * is to run an eye down the document and see where the recognition reached.
+   * This lived in the single-page editor and was lost when that went, leaving a
+   * switch that quietly did nothing.
+   */
+  setInspect(on) {
+    this.inspect = Boolean(on);
+    this.root.classList.toggle('is-inspecting', this.inspect);
+    for (const [id, frame] of this.frames) this.drawInspection(frame, this.ws.pageById(id));
+  }
+
+  drawInspection(frame, page) {
+    const host = frame.querySelector('.inspectlayer');
+    if (!host) return;
+    clear(host);
+    if (!this.inspect || !page) return;
+
+    const groups = [
+      ['existing', page.meta?.ocrTextBoxesList ?? []],
+      ['ocr', (page.ocr?.words ?? []).map((word) => ({ x: word.x, y: word.y, w: word.w, h: word.h, text: word.text }))],
+    ];
+
+    for (const [kind, boxes] of groups) {
+      for (const box of boxes) {
+        host.appendChild(h(`div.inspectbox.inspectbox--${kind}`, {
+          style: {
+            left: `${box.x * 100}%`,
+            top: `${box.y * 100}%`,
+            width: `${box.w * 100}%`,
+            height: `${box.h * 100}%`,
+          },
+          title: box.text ? `Recognised: ${box.text}` : 'Text the PDF already had',
+        }));
+      }
     }
   }
 
@@ -509,9 +553,9 @@ export class PageViewer {
       // The gap sits between pages, never after the last one.
       contentHeight += contentHeight ? pageHeight + PAGE_GAP : pageHeight;
 
-      // The text and the editing layer are both laid out in page points and
-      // scaled as one, so a text box and the word under it never drift apart.
-      for (const selector of ['.textlayer', '.viewer__overlay']) {
+      // Text, inspection and editing are all laid out in page points and scaled
+      // as one, so a text box and the word under it never drift apart.
+      for (const selector of ['.textlayer', '.inspectlayer', '.viewer__overlay']) {
         const el = frame.querySelector(selector);
         el.style.width = `${w}px`;
         el.style.height = `${ph}px`;

@@ -1099,7 +1099,7 @@ class App {
   setOcrInspect(on) {
     this.ocrInspect = Boolean(on);
     this.grid.setOcrInspect(this.ocrInspect);
-    this.viewer.setInspect?.(this.ocrInspect);
+    this.viewer.setInspect(this.ocrInspect);
   }
 
   /**

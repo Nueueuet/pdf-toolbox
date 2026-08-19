@@ -22,6 +22,7 @@ import { analysePage } from '../app/core/coverage.js';
 import { ocrAvailable, ocrPage } from '../app/core/ocr.js';
 import { ocrLines } from '../app/ui/ocrlayer.js';
 import { readableRuns, coloursOf } from '../app/core/retype.js';
+import { fillCounter, hasCounter } from '../app/core/counter.js';
 import {
   targetOf, nameFromUrl, supported, turnOn, turnOff, reconcile, diagnose, looksLikePdf, workspaceFor,
 } from '../app/core/intercept.js';
@@ -1062,6 +1063,33 @@ test('a text box is drawn once, not painted into the page as well', async () => 
     'the page the viewer draws changed when a text box was added — it is being painted in twice');
   assert(await fingerprint({ withAnnots: true }) !== bare,
     'the thumbnail path stopped drawing annotations, and the grid has no layer to show them instead');
+});
+
+test('a counting mark carries on across the copies', async () => {
+  assert(hasCounter('Page {n} of 12'), 'a mark was not recognised');
+  assert(!hasCounter('Page 1 of 12'), 'plain text was taken for a mark');
+
+  const run = (text, opts) => [0, 1, 2, 3].map((i) => fillCounter(text, i, opts));
+
+  assert(run('Page {n}', { start: 3 }).join() === 'Page 3,Page 4,Page 5,Page 6', 'numbers');
+  assert(run('{a})', { start: 1 }).join() === 'a),b),c),d)', 'lower-case letters');
+  assert(run('Exhibit {A}', { start: 'c' }).join()
+    === 'Exhibit C,Exhibit D,Exhibit E,Exhibit F', 'starting from a letter');
+  assert(run('{i}', { start: 1 }).join() === 'i,ii,iii,iv', 'roman numerals');
+  assert(run('No. {n}', { start: 10, step: 5 }).join()
+    === 'No. 10,No. 15,No. 20,No. 25', 'counting up in steps');
+
+  // Two marks in one box, offset from each other: "sheet 1 of ..." style.
+  assert(fillCounter('{n} and {n+1}', 0, { start: 1 }) === '1 and 2', 'an offset mark');
+
+  // Anything else in braces is text the document happens to contain, and has to
+  // come out exactly as it went in.
+  assert(fillCounter('Total {sum} on {n}', 2, { start: 1 }) === 'Total {sum} on 3',
+    'braces that are not a mark were touched');
+  assert(fillCounter('nothing here', 5, { start: 1 }) === 'nothing here', 'text without a mark');
+
+  // Letters roll over the way spreadsheet columns do rather than stopping at z.
+  assert(fillCounter('{A}', 26, { start: 1 }) === 'AA', `26 letters on gave ${fillCounter('{A}', 26, { start: 1 })}`);
 });
 
 test('a wide sheet can be panned past all four of its edges', async () => {

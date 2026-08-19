@@ -7,6 +7,7 @@ import {
 import { FONT_FAMILIES } from '../core/fonts.js';
 import { makeAnnot, applyMark } from '../core/annots.js';
 import { readableRuns, coloursOf } from '../core/retype.js';
+import { COUNTER_KINDS, fillCounter, hasCounter } from '../core/counter.js';
 import { parseRange } from '../util/ranges.js';
 import { pageScope } from './organize.js';
 import { toast } from '../ui/toast.js';
@@ -206,18 +207,42 @@ const write = {
       const page = ctx.currentPage();
       if (!annot || !page) return toast('Select a text box first', { tone: 'error' });
 
-      const value = await modal({
+      const counting = hasCounter(annot.text);
+
+      const answer = await modal({
         title: 'Copy text box to pages',
-        width: 400,
+        width: 420,
         render: (close) => {
           const input = textInput({ value: 'all', placeholder: 'all, or 1-10, or 1,4,10' });
+          const start = textInput({ value: '1', placeholder: '1' });
+          const step = numberInput({ value: 1, min: 1, max: 999 });
+          const preview = h('p.modal__text.modal__text--muted');
+
+          const showPreview = () => {
+            if (!counting) return;
+            const from = start.value.trim() || '1';
+            const by = Math.max(1, step.valueAsNumber || 1);
+            const first = [0, 1, 2].map((i) => fillCounter(annot.text, i, { start: from, step: by }));
+            preview.textContent = `First three: ${first.join('  ·  ')}`;
+          };
+          start.addEventListener('input', showPreview);
+          step.addEventListener('input', showPreview);
+          showPreview();
+
           return h('form', {
             onsubmit: (event) => {
               event.preventDefault();
-              close(input.value);
+              close({ pages: input.value, start: start.value.trim() || '1', step: Math.max(1, step.valueAsNumber || 1) });
             },
           },
             field('Pages', input, 'The box is copied — later edits stay independent.'),
+            counting
+              ? h('div',
+                field('Start at', start, 'A number, or a letter for {a} and {A}.'),
+                field('Count up by', step),
+                preview,
+              )
+              : null,
             h('div.modal__actions',
               h('button.btn', { type: 'button', onclick: () => close(null) }, 'Cancel'),
               h('button.btn.btn--primary', { type: 'submit' }, 'Copy'),
@@ -225,15 +250,33 @@ const write = {
           );
         },
       });
-      if (value == null) return;
+      if (answer == null) return;
 
-      const { pages, error } = parseRange(value, ctx.ws.pageCount);
+      const { pages, error } = parseRange(answer.pages, ctx.ws.pageCount);
       if (error) return toast(error, { tone: 'error' });
       const targets = ctx.ws.pagesByNumbers(pages).filter((p) => p.id !== page.id);
       if (targets.length === 0) return toast('No other pages matched', { tone: 'error' });
 
       ctx.commit('Copy text box', () => {
-        for (const target of targets) target.annots.push(makeAnnot({ ...annot }));
+        /*
+         * The box being copied from is the first in the run, so it takes the
+         * starting value and the copies carry on from there. Numbering that
+         * skipped the page you set it up on would be a strange thing to hand
+         * back.
+         */
+        // Held onto before the original is filled in: once its marks are
+        // replaced there is nothing left for the copies to count from, and every
+        // one of them would come out with the starting value.
+        const template = annot.text;
+        if (counting) {
+          annot.text = fillCounter(template, 0, answer);
+          annot.marks = [];
+        }
+        for (const [i, target] of targets.entries()) {
+          const copy = makeAnnot({ ...annot });
+          if (counting) copy.text = fillCounter(template, i + 1, answer);
+          target.annots.push(copy);
+        }
       });
       toast(`Copied to ${targets.length} pages`, { tone: 'success' });
     };
@@ -251,8 +294,40 @@ const write = {
       toast('Saved as a stamp', { tone: 'success' });
     };
 
+    /**
+     * Puts a counting mark into the selected box.
+     *
+     * Typed at the caret if there is one, so it can be dropped mid-sentence —
+     * "Page {n} of 12" — rather than only tacked on the end.
+     */
+    const insertCounter = (kind) => {
+      const annot = props.current;
+      if (!annot) return toast('Select a text box first', { tone: 'error' });
+
+      const mark = `{${kind}}`;
+      const at = ctx.editor.selectionRange();
+      const text = String(annot.text ?? '');
+      const cut = at ? at.start : text.length;
+      const end = at ? at.end : text.length;
+
+      ctx.commit('Add a counter', () => {
+        annot.text = text.slice(0, cut) + mark + text.slice(end);
+        annot.marks = [];
+      });
+      ctx.editor.refreshText(annot);
+      ctx.editor.focusText(annot, { at: 'end' });
+      toast('Now use “Copy to pages…” — each copy gets the next one', { timeout: 6000 });
+    };
+
     return h('div',
       section(null, buttonRow(primary('Add text box', { onclick: add }))),
+      section('Counting',
+        buttonRow(...COUNTER_KINDS.map(({ key, label }) => button(`{${key}}`, {
+          title: label,
+          onclick: () => insertCounter(key),
+        }))),
+        hint('Puts a mark in the box that counts up as it is copied across pages: {n} for 1, 2, 3, {a} or {A} for letters, {i} or {I} for roman numerals. Where it starts, and how far it steps, is asked when you copy.'),
+      ),
       section('The page’s own text',
         buttonRow(button('Take over some text…', { onclick: retype })),
         hint('Covers a run of the page’s text and puts an editable box in its place, at the same position, size and colour. The letters are redrawn in the nearest standard font: the original is embedded in the file as only the characters it already uses, so nothing new can be typed in it.'),
