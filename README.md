@@ -6,8 +6,14 @@ per tool: every tool acts on the same document in the same window.
 
 Everything runs locally. No file is ever uploaded anywhere.
 
-The layout is three columns: tools on the left, the page grid in the middle,
-and the selected tool's options on the right.
+The layout is three columns: tools on the left, the document in the middle, and
+the selected tool's options on the right.
+
+There are two ways to look at a document and no others: **the viewer**, one page
+or a continuous stack, and **the overview**, every page or every file as a grid.
+Tools have no views of their own — you open one and it acts on whichever of the
+two you are already in, on the page in front of you. Writing, stamping and
+cropping all happen on the viewer's pages, at whatever zoom is set.
 
 ## Install
 

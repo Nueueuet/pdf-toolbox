@@ -391,7 +391,7 @@ const crop = {
   id: 'crop',
   label: 'Crop',
   group: 'Organise',
-  mode: 'page',
+  mode: 'viewer',
   editorMode: 'crop',
   icon: 'M6 2v14a2 2 0 0 0 2 2h14 M2 6h14a2 2 0 0 1 2 2v14',
   blurb: 'Drag the frame to choose the visible area, then apply it to this page or to a range.',

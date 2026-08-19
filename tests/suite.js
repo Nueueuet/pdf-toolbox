@@ -16,7 +16,6 @@ import { pageSize } from '../app/core/workspace.js';
 import { extractRows, toCsv } from '../app/core/text.js';
 import { parseRange, formatRange } from '../app/util/ranges.js';
 import { primeFontMetrics } from '../app/core/fonts.js';
-import { PageEditor } from '../app/ui/pageeditor.js';
 import { PageGrid } from '../app/ui/pagegrid.js';
 import { PageViewer } from '../app/ui/pageviewer.js';
 import { analysePage } from '../app/core/coverage.js';
@@ -427,9 +426,10 @@ test('page text can be selected and copied', async () => {
   // so this checks the words are really there and really selectable.
   const ws = await loadWorkspace(['report.pdf']);
   const host = document.createElement('div');
+  host.className = 'viewer';
   host.style.cssText = 'position:fixed;left:0;top:0;width:900px;height:700px;opacity:0;z-index:9999';
   document.body.appendChild(host);
-  const editor = new PageEditor(host, ws, { onChange: () => {}, onSelectAnnot: () => {} });
+  const editor = new PageViewer(host, ws, { onChange: () => {}, onSelectAnnot: () => {} });
 
   try {
     await editor.open(ws.pages[0]);
@@ -471,9 +471,10 @@ test('a text box moves from its edge, but takes a caret in the middle', async ()
   page.annots = [makeAnnot({ text: 'Hello there', x: 0.2, y: 0.2, w: 0.5, h: 0.2 })];
 
   const host = document.createElement('div');
+  host.className = 'viewer';
   host.style.cssText = 'position:fixed;left:0;top:0;width:900px;height:700px;opacity:0;z-index:9999';
   document.body.appendChild(host);
-  const editor = new PageEditor(host, ws, { onChange: () => {}, onSelectAnnot: () => {} });
+  const editor = new PageViewer(host, ws, { onChange: () => {}, onSelectAnnot: () => {} });
 
   const press = (el, at, move) => {
     const base = { bubbles: true, cancelable: true, button: 0, pointerId: 1 };
@@ -714,9 +715,10 @@ test('recognised text can be selected in the app, not only in the saved file', a
   scan.ocr = { words: result.words, regions: result.regions, verdict: result.verdict };
 
   const host = document.createElement('div');
+  host.className = 'viewer';
   host.style.cssText = 'position:fixed;left:0;top:0;width:900px;height:700px;opacity:0;z-index:9999';
   document.body.appendChild(host);
-  const editor = new PageEditor(host, ws, { onChange: () => {}, onSelectAnnot: () => {} });
+  const editor = new PageViewer(host, ws, { onChange: () => {}, onSelectAnnot: () => {} });
 
   try {
     await editor.open(scan);
@@ -740,7 +742,7 @@ test('recognised text can be selected in the app, not only in the saved file', a
     assert(copied.trim().length > 0, 'selecting a recognised word produced nothing');
 
     // And each word has to sit on the page rather than beside it.
-    const stage = host.querySelector('.editor__stage').getBoundingClientRect();
+    const stage = host.querySelector('.viewer__page').getBoundingClientRect();
     const box = spans[0].getBoundingClientRect();
     assert(box.left >= stage.left - 2 && box.right <= stage.right + 2,
       'a recognised word is positioned outside the page');

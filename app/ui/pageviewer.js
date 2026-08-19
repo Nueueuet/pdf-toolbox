@@ -17,6 +17,7 @@ import { renderPageCanvas, viewportFor } from '../core/render.js';
 import { makeMapper, totalQuarter } from '../core/geometry.js';
 import { pageSize } from '../core/workspace.js';
 import { appendOcrText } from './ocrlayer.js';
+import { AnnotationLayer } from './annotlayer.js';
 import { TextLayer } from '../../vendor/pdf.mjs';
 
 /**
@@ -58,6 +59,8 @@ export class PageViewer {
     this.currentPageId = null;
     this.renderToken = 0;
     this.frames = new Map(); // page id -> frame element
+    this.layers = new Map(); // page id -> its editing layer
+    this.editMode = 'select';
 
     this.scroller = h('div.viewer__scroll');
     this.pages = h('div.viewer__pages');
@@ -233,6 +236,7 @@ export class PageViewer {
     const token = ++this.renderToken;
     clear(this.pages);
     this.frames.clear();
+    this.layers.clear();
     if (this.ws.pageCount === 0) return;
 
     this.root.dataset.layout = this.layout;
@@ -248,6 +252,7 @@ export class PageViewer {
     }
 
     this.relayout();
+    this.applyEditMode();
     this.syncNav();
     if (this.layout === 'continuous') this.scrollToPage(this.currentPageId, 'auto');
     if (token === this.renderToken) this.handlers.onZoomChange?.(this.effectiveZoom(), this.zoom === null);
@@ -255,13 +260,93 @@ export class PageViewer {
 
   frame(page) {
     const { w, h: ph } = pageSize(page);
+    /*
+     * Every page carries its own editing layer, so a text box is edited on the
+     * page it belongs to rather than on whichever page a separate editor decided
+     * to show. The layer is laid out in page points and scaled with the rest, so
+     * a box stays where it was put at any zoom.
+     */
+    const overlay = h('div.editor__overlay.viewer__overlay');
     const frame = h('div.viewer__page', { dataset: { id: page.id, w: String(w), h: String(ph) } },
       h('div.viewer__canvas'),
       h('div.textlayer'),
+      overlay,
       h('span.viewer__number', String(this.ws.indexOf(page.id) + 1)),
     );
+
+    const layer = new AnnotationLayer({
+      el: overlay,
+      handlers: this.handlers,
+      pageBox: () => {
+        const box = frame.getBoundingClientRect();
+        return { width: box.width, height: box.height };
+      },
+    });
+    layer.setPage(page);
+    this.layers.set(page.id, layer);
+
+    // The overlay lets clicks through so the text underneath stays selectable,
+    // so "click the page to deselect" has to be caught on the frame instead.
+    frame.addEventListener('pointerdown', (event) => {
+      if (event.target.closest('.abox') || event.target.closest('.crop')) return;
+      this.setCurrentPage(page.id);
+      layer.select(null);
+    });
+
     return frame;
   }
+
+  /** The editing layer for the page being worked on. */
+  get layer() {
+    return this.layers.get(this.currentPageId) ?? null;
+  }
+
+  /**
+   * Which page the tools act on. In a stack this follows what you click, so
+   * using a tool means using it where you are.
+   */
+  setCurrentPage(id) {
+    if (id === this.currentPageId || !this.ws.pageById(id)) return;
+    this.currentPageId = id;
+    this.applyEditMode();
+    this.syncNav();
+    this.handlers.onPageChange?.(this.ws.pageById(id));
+  }
+
+  /**
+   * @param {string} mode 'select' or 'crop'
+   *
+   * Cropping is about one page, so only the page being worked on gets the
+   * rectangle; annotations belong to every page and are drawn on all of them.
+   */
+  setEditMode(mode) {
+    this.editMode = mode;
+    this.root.dataset.mode = mode;
+    this.applyEditMode();
+  }
+
+  applyEditMode() {
+    for (const [id, layer] of this.layers) {
+      layer.setMode(this.editMode === 'crop' && id === this.currentPageId ? 'crop' : 'select');
+    }
+  }
+
+  /*
+   * The same calls the single-page editor answers, so a tool panel does not care
+   * which surface it is driving. Each goes to the layer of the page being worked
+   * on; annotations elsewhere in a stack look after themselves.
+   */
+  setMode(mode) { this.setEditMode(mode); }
+  drawOverlay() { this.applyEditMode(); }
+  selectedAnnot() { return this.layer?.selectedAnnot() ?? null; }
+  select(id) { this.layer?.select(id); }
+  focusText(annot, opts) { this.layer?.focusText(annot, opts); }
+  isEditingText() { return [...this.layers.values()].some((l) => l.isEditingText()); }
+  selectionRange() { return this.layer?.selectionRange() ?? null; }
+  refreshText(annot) { this.layer?.refreshText(annot); }
+  syncAnnot(annot) { this.layer?.syncAnnot(annot); }
+  currentCrop() { return this.layer?.currentCrop() ?? null; }
+  setCrop(crop) { this.layer?.setCrop(crop); }
 
   /**
    * Room to push the page past the edge of the window, so a detail sitting in a
@@ -311,10 +396,14 @@ export class PageViewer {
       // The gap sits between pages, never after the last one.
       contentHeight += contentHeight ? pageHeight + PAGE_GAP : pageHeight;
 
-      const layer = frame.querySelector('.textlayer');
-      layer.style.width = `${w}px`;
-      layer.style.height = `${ph}px`;
-      layer.style.transform = `scale(${scale})`;
+      // The text and the editing layer are both laid out in page points and
+      // scaled as one, so a text box and the word under it never drift apart.
+      for (const selector of ['.textlayer', '.viewer__overlay']) {
+        const el = frame.querySelector(selector);
+        el.style.width = `${w}px`;
+        el.style.height = `${ph}px`;
+        el.style.transform = `scale(${scale})`;
+      }
 
       // A page whose bitmap was drawn for a very different scale is redrawn, so
       // zooming in does not just enlarge a blurry picture.

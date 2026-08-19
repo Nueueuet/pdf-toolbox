@@ -1,11 +1,10 @@
 /**
  * Application shell: owns the workspace, decides whether the centre shows the
- * page grid or the single-page editor, and hands every tool the same context.
+ * page grid or the viewer, and hands every tool the same context.
  */
 import { $, h, clear } from './util/dom.js';
 import { Workspace, normalizeQuarter } from './core/workspace.js';
 import { PageGrid } from './ui/pagegrid.js';
-import { PageEditor } from './ui/pageeditor.js';
 import { TOOLS, GROUPS, DEFAULT_TOOL } from './tools/index.js';
 import { PageViewer } from './ui/pageviewer.js';
 import { loadViewerSettings, saveViewerSettings, DEFAULT_LAYOUT } from './tools/viewer.js';
@@ -41,11 +40,8 @@ class App {
       landing: $('#landing'),
       surface: $('#surface'),
       grid: $('#pageGrid'),
-      editor: $('#editor'),
-      editorbar: $('#editorbar'),
       viewer: $('#viewer'),
       viewerbar: $('#viewerbar'),
-      editorLabel: $('#editorLabel'),
       wsbar: $('#wsbar'),
       rail: $('#rail'),
       panel: $('#panel'),
@@ -68,23 +64,6 @@ class App {
       onOpenPage: (page) => this.openPage(page),
       onCommand: (name, payload) => this.handleGridCommand(name, payload),
     });
-    this.editor = new PageEditor(this.el.editor, this.ws, {
-      onChange: (opts) => this.onEditorChange(opts),
-      onSelectAnnot: (annot) => {
-        for (const listener of this.annotListeners) listener(annot);
-      },
-      onDeleteAnnot: (annot) => this.deleteAnnot(annot),
-      onStepPage: (delta) => this.stepPage(delta),
-      onViewPage: (page) => this.selectTool('viewer', page),
-      // One undo step per editing session, not one per keystroke.
-      onCommitText: (annot, after) => {
-        this.ws.commit('Edit text', () => {
-          annot.text = after.text;
-          annot.marks = after.marks;
-        });
-      },
-    });
-
     this.viewer = new PageViewer($('#viewer'), this.ws, {
       onPageChange: (page) => {
         this.currentPageId = page?.id ?? this.currentPageId;
@@ -93,6 +72,19 @@ class App {
       onZoomChange: (zoom, isFit) => {
         $('#viewerZoom').textContent = `${Math.round(zoom * 100)}%`;
         this.onViewerZoom?.(zoom, isFit);
+      },
+      // Editing happens on the pages the viewer shows, so these come here.
+      onChange: (opts) => this.onEditorChange(opts),
+      onSelectAnnot: (annot) => {
+        for (const listener of this.annotListeners) listener(annot);
+      },
+      onDeleteAnnot: (annot) => this.deleteAnnot(annot),
+      // One undo step per editing session, not one per keystroke.
+      onCommitText: (annot, after) => {
+        this.ws.commit('Edit text', () => {
+          annot.text = after.text;
+          annot.marks = after.marks;
+        });
       },
     });
 
@@ -110,8 +102,7 @@ class App {
       // to rebuild — otherwise OCR finishes and the page still cannot be
       // selected from until something else happens to redraw it.
       if (this.mode === 'grid') this.grid.render();
-      else if (this.mode === 'viewer') this.viewer.rebind(this.currentPage());
-      else this.editor.refresh();
+      else this.viewer.rebind(this.currentPage());
     });
     this.ws.on('history', () => this.syncHistoryButtons());
     this.ws.on('selection', () => this.syncSelectionStatus());
@@ -344,8 +335,8 @@ class App {
         color: '#0a6fc2', bgColor: '#eaf4fd',
         border: { color: '#0d8bf2', width: 1 },
       }));
-      await this.editor.refresh();
-      this.editor.select(page.annots[page.annots.length - 1].id);
+      await this.viewer.rebind(page);
+      this.viewer.select(page.annots[page.annots.length - 1].id);
     }
 
     document.documentElement.dataset.demoReady = 'true';
@@ -439,7 +430,6 @@ class App {
     $('#fullscreenBtn').addEventListener('click', () => this.toggleFullscreen());
     // Leaving full screen by the Escape key or F11 has to move the button too.
     document.addEventListener('fullscreenchange', () => this.syncFullscreen());
-    $('#backToGrid').addEventListener('click', () => this.showGrid());
     $('#viewerToGrid').addEventListener('click', () => this.showGrid());
     const pageInput = $('#viewerPageInput');
     pageInput.addEventListener('change', () => this.goToPage(pageInput.value));
@@ -458,8 +448,6 @@ class App {
       this.viewer.setZoom(null);
       this.persistViewerSettings();
     });
-    $('#prevPage').addEventListener('click', () => this.stepPage(-1));
-    $('#nextPage').addEventListener('click', () => this.stepPage(1));
 
     this.el.docTitle.addEventListener('change', () => {
       this.ws.name = this.el.docTitle.value.trim() || 'document';
@@ -528,11 +516,12 @@ class App {
         return;
       }
       if ((event.key === 'Delete' || event.key === 'Backspace') && !typing) {
-        // In the page editor these keys remove the selected box — but only when
-        // it was picked up by its edge. With the caret in the text they belong
-        // to the text, and `typing` has already sent us home.
-        const annot = this.mode === 'page' && !this.editor.isEditingText()
-          ? this.editor.selectedAnnot()
+        // On a page these keys remove the selected box — but only when it was
+        // picked up by its edge. With the caret in the text they belong to the
+        // text, and `typing` has already sent us home.
+        const surface = this.surfaceEditor;
+        const annot = this.onSinglePage && !surface.isEditingText()
+          ? surface.selectedAnnot()
           : null;
         if (annot) {
           event.preventDefault();
@@ -560,17 +549,6 @@ class App {
         }
       }
 
-      // Paging through a document with the arrow keys, as long as the caret is
-      // not in a text box, where they belong to the text.
-      if (this.mode === 'page' && !typing && !meta) {
-        if (event.key === 'ArrowLeft' || event.key === 'PageUp') {
-          event.preventDefault();
-          this.stepPage(-1);
-        } else if (event.key === 'ArrowRight' || event.key === 'PageDown') {
-          event.preventDefault();
-          this.stepPage(1);
-        }
-      }
     });
   }
 
@@ -650,14 +628,23 @@ class App {
    */
   get mode() {
     if (!this.currentPageId) return 'grid';
-    if (this.surface === 'page') return 'page';
     if (this.surface === 'viewer') return 'viewer';
     return 'grid';
   }
 
   /** True while one page fills the workspace, whether for reading or editing. */
   get onSinglePage() {
-    return this.mode === 'page' || this.mode === 'viewer';
+    return this.mode === 'viewer';
+  }
+
+  /**
+   * The surface a tool should be editing on: the one in front of the reader.
+   *
+   * There is only one now; the getter stays because every tool goes through it,
+   * and a single name is easier to follow than the same check in ten places.
+   */
+  get surfaceEditor() {
+    return this.viewer;
   }
 
   currentPage() {
@@ -706,8 +693,7 @@ class App {
     }
 
     this.grid.render();
-    if (this.mode === 'page') this.editor.rebind(this.currentPage());
-    else if (this.mode === 'viewer') {
+    if (this.mode === 'viewer') {
       this.viewer.rebind(this.currentPage());
       this.syncViewerLabel();
     }
@@ -758,17 +744,22 @@ class App {
     this.grid.setTextMode(id === 'copytext');
     this.grid.setOcrMode(id === 'ocr');
 
-    // The surface is switched before the panel is built so that a panel can read
-    // the editor's state (selected annotation, crop rectangle) as it renders.
+    /*
+     * The surface is settled before the panel is built, so a panel can read the
+     * state it is about to show — the selected box, the crop rectangle.
+     *
+     * A tool that works on a page does not send you anywhere any more: it uses
+     * the page you are already looking at. Only a tool that genuinely needs the
+     * whole document in front of it asks for the grid, and only when you are not
+     * already on a page.
+     */
     if (tool.mode === 'viewer') {
       this.currentPageId = (page ?? this.currentPage())?.id ?? null;
       this.showViewer();
-    } else if (tool.mode === 'page') {
-      this.currentPageId = (page ?? this.currentPage())?.id ?? null;
-      this.showEditor(tool.editorMode ?? 'select');
-    } else if (tool.mode === 'any' && this.onSinglePage) {
-      // Works on either surface, so leave the one the user is looking at.
-      if (this.mode === 'page') this.editor.setMode('select');
+      this.viewer.setEditMode(tool.editorMode ?? 'select');
+    } else if (tool.mode === 'any') {
+      if (this.mode === 'viewer') this.viewer.setEditMode('select');
+      else if (!this.onSinglePage) this.showGrid();
     } else {
       this.showGrid();
     }
@@ -780,7 +771,9 @@ class App {
     return {
       ws: this.ws,
       app: this,
-      editor: this.editor,
+      // Whichever surface is showing the page. Both answer the same calls, so a
+      // tool panel edits where the reader is rather than sending them somewhere.
+      editor: this.surfaceEditor,
       grid: this.grid,
       currentPage: () => this.currentPage(),
       commit: (label, mutate) => this.ws.commit(label, mutate),
@@ -790,7 +783,7 @@ class App {
     };
   }
 
-  /** Live edits repaint the editor immediately; the grid catches up when idle. */
+  /** Live edits repaint the page immediately; the grid catches up when idle. */
   scheduleThumbRefresh() {
     clearTimeout(this.thumbTimer);
     this.thumbTimer = setTimeout(() => {
@@ -805,8 +798,8 @@ class App {
     this.ws.commit(annot.role === 'stamp' ? 'Delete stamp' : 'Delete text box', () => {
       page.annots = page.annots.filter((a) => a.id !== annot.id);
     });
-    this.editor.drawOverlay();
-    this.editor.select(null);
+    this.surfaceEditor.drawOverlay();
+    this.surfaceEditor.select(null);
     toast('Deleted', {
       tone: 'info',
       action: { label: 'Undo', onClick: () => this.ws.undo() },
@@ -823,16 +816,14 @@ class App {
   showGrid() {
     const tool = TOOLS.find((t) => t.id === this.activeToolId);
     // Leaving a single-page surface means leaving the tool that needed it.
-    if (tool?.mode === 'page' || tool?.mode === 'viewer') {
+    if (tool?.mode === 'viewer') {
       this.selectTool('merge');
       return;
     }
     this.surface = 'grid';
     this.el.grid.hidden = false;
-    this.el.editor.hidden = true;
     this.el.viewer.hidden = true;
     this.el.wsbar.hidden = false;
-    this.el.editorbar.hidden = true;
     this.el.viewerbar.hidden = true;
     this.grid.render();
   }
@@ -840,10 +831,8 @@ class App {
   showViewer() {
     this.surface = 'viewer';
     this.el.grid.hidden = true;
-    this.el.editor.hidden = true;
     this.el.viewer.hidden = false;
     this.el.wsbar.hidden = true;
-    this.el.editorbar.hidden = true;
     this.el.viewerbar.hidden = false;
 
     const page = this.currentPage();
@@ -876,52 +865,27 @@ class App {
     saveViewerSettings({ layout: this.viewer.layout, zoom: this.viewer.zoom });
   }
 
-  showEditor(editorMode) {
-    this.surface = 'page';
-    this.el.grid.hidden = true;
-    this.el.viewer.hidden = true;
-    this.el.viewerbar.hidden = true;
-    this.el.editor.hidden = false;
-    this.el.wsbar.hidden = true;
-    this.el.editorbar.hidden = false;
-
-    const page = this.currentPage();
-    if (!page) return;
-    this.editor.setMode(editorMode);
-    this.editor.open(page);
-
-    const index = this.ws.indexOf(page.id);
-    this.el.editorLabel.textContent = `Page ${index + 1} of ${this.ws.pageCount}`;
-    $('#prevPage').disabled = index <= 0;
-    $('#nextPage').disabled = index >= this.ws.pageCount - 1;
-  }
-
-  /** Called when a page is opened from the grid, or stepped to with the arrows. */
+  /**
+   * Called when a page is opened from the grid, or stepped to with the arrows.
+   *
+   * There is only one place a page can be opened now, so this no longer has to
+   * work out which surface a tool wants. A grid-only tool still hands over,
+   * because its panel has nothing to say about a single page.
+   */
   openPage(page) {
     if (!page) return;
     const tool = TOOLS.find((t) => t.id === this.activeToolId);
+    const staysOnThePage = tool?.mode === 'viewer' || tool?.mode === 'any';
 
-    if (tool?.mode === 'viewer') {
-      this.currentPageId = page.id;
-      this.viewer.open(page);
-      this.syncViewerLabel();
-      return;
-    }
-
-    /*
-     * A tool that works on either surface stays put. Only a grid-only tool has
-     * to hand over, because its panel cannot act on a single page — and it
-     * hands over to Write. Getting this wrong meant paging through a document
-     * with the arrows threw you out of OCR and into Write on the first press.
-     */
-    if (tool?.mode !== 'page' && tool?.mode !== 'any') {
-      // Opening a page from the grid means "show me this", so it lands in the
-      // viewer rather than in an editing tool.
+    if (!staysOnThePage) {
       this.selectTool(DEFAULT_TOOL, page);
       return;
     }
+
     this.currentPageId = page.id;
-    this.showEditor(tool.mode === 'page' ? (tool.editorMode ?? 'select') : 'select');
+    this.showViewer();
+    this.viewer.open(page);
+    this.syncViewerLabel();
   }
 
   /** Moves to the next or previous page, staying in the current tool. */
@@ -1044,7 +1008,7 @@ class App {
   setOcrInspect(on) {
     this.ocrInspect = Boolean(on);
     this.grid.setOcrInspect(this.ocrInspect);
-    this.editor.setInspect(this.ocrInspect);
+    this.viewer.setInspect?.(this.ocrInspect);
   }
 
   /**
