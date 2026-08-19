@@ -1074,6 +1074,24 @@ button { font: inherit; }
   text-overflow: ellipsis;
 }
 
+/* Each run of the page's own text, offered for the pointer to choose between. */
+.viewer.is-picking .textlayer { pointer-events: none; }
+
+.pickrun {
+  position: absolute;
+  padding: 0;
+  border: 1px solid rgba(13, 139, 242, .5);
+  border-radius: 2px;
+  background: rgba(13, 139, 242, .10);
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.pickrun:hover {
+  border-color: var(--blue);
+  background: rgba(13, 139, 242, .24);
+}
+
 /*
  * The middle of a box is text; only the band around the border moves it. The
  * cursor has to say which is which, or the box feels like it ignores clicks.

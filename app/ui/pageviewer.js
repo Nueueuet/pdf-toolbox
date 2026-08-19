@@ -403,6 +403,47 @@ export class PageViewer {
     this.placement = null;
   }
 
+  /**
+   * Offers the page's own runs of text for the pointer to choose between.
+   *
+   * Drawn as outlines rather than left to the invisible text layer: the point of
+   * this mode is seeing what a click would take, and a run of text is not
+   * necessarily the line or the word the eye would group it into.
+   *
+   * @param {{x: number, y: number, w: number, h: number}[]} runs page fractions
+   * @param {(run: object) => void} onPick
+   */
+  armPick(runs, onPick) {
+    this.disarmPlacement();
+    this.root.classList.add('is-picking');
+
+    const frame = this.frames.get(this.currentPageId);
+    const overlay = frame?.querySelector('.viewer__overlay');
+    if (!overlay) return;
+
+    const marks = runs.map((run) => {
+      const mark = h('button.pickrun', { type: 'button', title: run.text.slice(0, 60) });
+      Object.assign(mark.style, {
+        left: `${run.x * 100}%`,
+        top: `${run.y * 100}%`,
+        width: `${run.w * 100}%`,
+        height: `${run.h * 100}%`,
+      });
+      mark.addEventListener('pointerdown', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onPick(run);
+      });
+      overlay.appendChild(mark);
+      return mark;
+    });
+
+    this.placement = () => {
+      for (const mark of marks) mark.remove();
+      this.root.classList.remove('is-picking');
+    };
+  }
+
   /*
    * The same calls the single-page editor answers, so a tool panel does not care
    * which surface it is driving. Each goes to the layer of the page being worked

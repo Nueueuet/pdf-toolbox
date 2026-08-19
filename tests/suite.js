@@ -21,6 +21,7 @@ import { PageViewer } from '../app/ui/pageviewer.js';
 import { analysePage } from '../app/core/coverage.js';
 import { ocrAvailable, ocrPage } from '../app/core/ocr.js';
 import { ocrLines } from '../app/ui/ocrlayer.js';
+import { readableRuns, coloursOf } from '../app/core/retype.js';
 import {
   targetOf, nameFromUrl, supported, turnOn, turnOff, reconcile, diagnose, looksLikePdf, workspaceFor,
 } from '../app/core/intercept.js';
@@ -612,6 +613,51 @@ test('a scanned page is recognised as needing OCR', async () => {
   assert(analysis.regions.length > 0, 'nothing was offered for OCR');
 });
 
+test('a running header is not mistaken for a speck', async () => {
+  /*
+   * Regions were kept or dropped on area alone, and a short header does not have
+   * any. "Chapter 3" at the top of a scan is about a tenth of the page wide and
+   * an eightieth tall — a thousandth of the page, four times under the threshold
+   * — so every header went unrecognised while the body text below it came out
+   * perfectly.
+   */
+  const canvas = document.createElement('canvas');
+  canvas.width = 1240;
+  canvas.height = 1754;
+  const c = canvas.getContext('2d');
+  c.fillStyle = '#fff';
+  c.fillRect(0, 0, canvas.width, canvas.height);
+  c.fillStyle = '#111';
+  c.font = '22px Arial';
+  c.fillText('Chapter 3', 110, 90);
+  c.font = '20px Arial';
+  for (let i = 0; i < 20; i++) {
+    c.fillText('Lorem ipsum dolor sit amet, consectetur adipiscing elit.', 110, 300 + i * 40);
+  }
+  // The things the threshold is there to reject, so this cannot be passed by
+  // simply keeping everything.
+  c.fillRect(600, 1700, 4, 4);
+  c.fillRect(650, 1712, 3, 3);
+
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([595.28, 841.89]);
+  page.drawImage(await doc.embedPng(await blob.arrayBuffer()), { x: 0, y: 0, width: 595.28, height: 841.89 });
+
+  const ws = new Workspace();
+  await ws.addBytes(await doc.save(), 'scan.pdf');
+  const analysis = await analysePage(ws, ws.pages[0]);
+
+  const header = analysis.regions.find((r) => r.y < 0.12);
+  assert(header, `nothing was offered for OCR at the top of the page; regions: ${
+    analysis.regions.map((r) => `${r.y.toFixed(2)}±${(r.w * r.h).toFixed(4)}`).join(', ')}`);
+  assert(header.w * header.h < 0.004,
+    'the test header is large enough to pass on area alone, so it proves nothing');
+
+  const specks = analysis.regions.filter((r) => r.y > 0.9);
+  assert(specks.length === 0, `${specks.length} speck(s) at the foot of the page were offered for OCR`);
+});
+
 test('a half-scanned page is only recognised where it helps', async () => {
   // The case that separates a useful OCR tool from a wasteful one: real text at
   // the top, a picture of text at the bottom. Recognising the whole page would
@@ -1178,6 +1224,47 @@ test('mirroring a page really reverses it, and survives being saved', async () =
   const bytes = await buildPdf(ws, [page], {});
   const doc = await pdfjsLib.getDocument({ data: bytes.slice() }).promise;
   assert(doc.numPages === 1, 'the mirrored page did not survive saving');
+});
+
+test('taking over the page’s own text puts a box in its place', async () => {
+  const ws = await loadWorkspace(['report.pdf']);
+  const page = ws.pages[0];
+
+  const runs = await readableRuns(ws, page);
+  assert(runs.length > 10, `only ${runs.length} runs of text were found`);
+
+  const heading = runs.find((r) => r.text.includes('Quarterly'));
+  assert(heading, 'the heading was not among the runs');
+  // The size has to be the one the page uses, or the replacement will not sit
+  // on the same line as what is around it.
+  assert(Math.abs(heading.size - 22) < 0.5, `the heading reads as ${heading.size}pt, not 22`);
+  assert(heading.y < 0.2 && heading.x > 0.02, `the heading is placed at ${heading.x}, ${heading.y}`);
+
+  const { ink, paper } = await coloursOf(ws, page, heading);
+  // Sampled from beside the words, not through them: from inside, the average
+  // is white blurred with the letters, and lays a grey rectangle on white paper.
+  assert(paper === '#ffffff', `the paper under the heading came out as ${paper}`);
+  assert(ink !== paper && ink < '#888888', `the ink came out as ${ink}`);
+
+  page.annots.push(makeAnnot({
+    text: 'Annual report — page 1',
+    x: heading.x, y: heading.y, w: heading.w, h: heading.h,
+    size: heading.size, family: heading.family, color: ink, bgColor: paper,
+  }));
+
+  const bytes = await buildPdf(ws, [page], {});
+  const doc = await pdfjsLib.getDocument({ data: bytes.slice() }).promise;
+  const text = (await (await doc.getPage(1)).getTextContent()).items.map((i) => i.str).join(' ');
+  assert(text.includes('Annual report'), 'the new wording is not in the saved file');
+  assert(text.includes('Region'), 'the rest of the page did not survive');
+
+  /*
+   * And the part worth being straight about: the old words are still in there,
+   * behind the cover. Anyone reaching for this to hide something would be
+   * mistaken, so the tool says so and this holds the claim to being true.
+   */
+  assert(text.includes('Quarterly report'),
+    'the original text is gone — then the warning about it being merely covered is now wrong');
 });
 
 test('saving a range of pages keeps their text selectable', async () => {

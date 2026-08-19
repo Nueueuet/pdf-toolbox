@@ -25,6 +25,24 @@ const INK_SHARE = 0.06;
 const TEXT_PADDING = 0.35;
 /** Regions smaller than this share of the page are noise — page numbers, rules, specks. */
 const MIN_REGION_AREA = 0.004;
+/**
+ * ...except a strip this wide and this tall, which is a line of writing however
+ * little of the page it covers.
+ *
+ * Area alone threw away running headers. "Chapter 3" at the top of a scan is
+ * about a tenth of the width and a eightieth of the height — a thousandth of the
+ * page, four times under the threshold — so every header on every page went
+ * unrecognised while the body text beneath was picked up perfectly. Judging the
+ * two dimensions separately keeps the specks and the rules out without taking
+ * short lines of text with them.
+ */
+const MIN_TEXT_WIDTH = 0.05;
+const MIN_TEXT_HEIGHT = 0.008;
+
+function looksLikeWriting(region) {
+  if (region.w * region.h >= MIN_REGION_AREA) return true;
+  return region.w >= MIN_TEXT_WIDTH && region.h >= MIN_TEXT_HEIGHT;
+}
 
 /**
  * @returns {Promise<{
@@ -50,7 +68,7 @@ export async function analysePage(ws, page) {
   const textCoverage = covered / grid.inked;
 
   // Ink still standing after the existing text is masked out is what OCR is for.
-  const regions = mergeRegions(grid).filter((r) => r.w * r.h >= MIN_REGION_AREA);
+  const regions = mergeRegions(grid).filter(looksLikeWriting);
 
   let verdict;
   if (regions.length === 0) verdict = 'text';

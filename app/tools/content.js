@@ -6,6 +6,7 @@ import {
 } from '../ui/controls.js';
 import { FONT_FAMILIES } from '../core/fonts.js';
 import { makeAnnot, applyMark } from '../core/annots.js';
+import { readableRuns, coloursOf } from '../core/retype.js';
 import { parseRange } from '../util/ranges.js';
 import { pageScope } from './organize.js';
 import { toast } from '../ui/toast.js';
@@ -150,6 +151,56 @@ const write = {
       ctx.editor.focusText(annot, { at: 'all' });
     };
 
+    /**
+     * Takes a run of the page's own text and makes it editable.
+     *
+     * The original is not changed — nothing here can change it. It is covered
+     * with the colour of the paper around it and an ordinary text box is put in
+     * its place, matching where it sat, how big it was and what colour it was.
+     */
+    const retype = async () => {
+      const page = ctx.currentPage();
+      if (!page) return toast('Open a page first', { tone: 'error' });
+
+      const runs = await readableRuns(ctx.ws, page);
+      if (runs.length === 0) {
+        return toast('This page has no text of its own to take over — run OCR on it first.',
+          { tone: 'error', timeout: 7000 });
+      }
+
+      toast('Click the words you want to take over', { timeout: 6000 });
+      ctx.app.viewer.armPick(runs, async (run) => {
+        ctx.app.viewer.disarmPlacement();
+        const { ink, paper } = await coloursOf(ctx.ws, page, run);
+        const annot = makeAnnot({
+          text: run.text,
+          x: run.x, y: run.y, w: run.w, h: run.h,
+          size: run.size,
+          family: run.family,
+          bold: run.bold,
+          italic: run.italic,
+          color: ink,
+          // The cover: without it the original shows through behind the new text.
+          bgColor: paper,
+          align: 'left',
+          valign: 'middle',
+          padding: 0,
+        });
+        ctx.commit('Take over text', () => page.annots.push(annot));
+        ctx.editor.drawOverlay();
+        ctx.editor.focusText(annot, { at: 'end' });
+      });
+    };
+
+    const stopPicking = (event) => {
+      if (event.key === 'Escape') ctx.app.viewer.disarmPlacement();
+    };
+    window.addEventListener('keydown', stopPicking);
+    ctx.onClose(() => {
+      window.removeEventListener('keydown', stopPicking);
+      ctx.app.viewer.disarmPlacement();
+    });
+
     const duplicateToPages = async () => {
       const annot = props.current;
       const page = ctx.currentPage();
@@ -202,6 +253,11 @@ const write = {
 
     return h('div',
       section(null, buttonRow(primary('Add text box', { onclick: add }))),
+      section('The page’s own text',
+        buttonRow(button('Take over some text…', { onclick: retype })),
+        hint('Covers a run of the page’s text and puts an editable box in its place, at the same position, size and colour. The letters are redrawn in the nearest standard font: the original is embedded in the file as only the characters it already uses, so nothing new can be typed in it.'),
+        hint('The words underneath are covered, not removed — they can still be found in the saved file. This is for correcting a document, not for hiding anything.'),
+      ),
       section('Properties', props.el),
       section(null, buttonRow(
         button('Copy to pages…', { onclick: duplicateToPages }),
