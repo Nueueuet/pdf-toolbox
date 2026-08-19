@@ -1092,6 +1092,75 @@ test('a counting mark carries on across the copies', async () => {
   assert(fillCounter('{A}', 26, { start: 1 }) === 'AA', `26 letters on gave ${fillCounter('{A}', 26, { start: 1 })}`);
 });
 
+test('text is selectable in reading order, whatever order the file stores it in', async () => {
+  /*
+   * A PDF holds its words in the order they were drawn, which for anything laid
+   * out in columns or boxes is often nowhere near the order it is read in. A
+   * selection is a range over the DOM, so left alone, dragging from the top of
+   * the page caught everything while starting a few lines down quietly skipped
+   * whatever the file happened to store earlier.
+   *
+   * This page is written deliberately out of order: bottom line first, heading
+   * last, the way the tax form that turned this up does it.
+   */
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const page = doc.addPage([595.28, 841.89]);
+  const lines = [
+    { text: 'THIRD line of the page', y: 640 },
+    { text: 'FIRST line of the page', y: 760 },
+    { text: 'FOURTH line of the page', y: 580 },
+    { text: 'SECOND line of the page', y: 700 },
+  ];
+  for (const line of lines) page.drawText(line.text, { x: 60, y: line.y, size: 16, font });
+
+  const ws = new Workspace();
+  await ws.addBytes(await doc.save(), 'jumbled.pdf');
+
+  const host = document.createElement('div');
+  host.className = 'viewer';
+  host.style.cssText = 'position:fixed;left:0;top:0;width:900px;height:700px;opacity:0;z-index:9999';
+  document.body.appendChild(host);
+
+  const viewer = new PageViewer(host, ws, {});
+  try {
+    await viewer.open(ws.pages[0]);
+    for (let i = 0; i < 50 && host.querySelectorAll('.textlayer span').length === 0; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
+    const spans = [...host.querySelectorAll('.textlayer span')]
+      .filter((s) => !s.classList.contains('endOfContent'));
+    assert(spans.length >= 4, `expected four runs, found ${spans.length}`);
+
+    // The order they now sit in is the order they are read in.
+    const order = spans.map((s) => s.textContent.trim().split(' ')[0]);
+    assert(order.join() === 'FIRST,SECOND,THIRD,FOURTH',
+      `the layer is in the order ${order.join(', ')}`);
+
+    // And the thing that was actually wrong: starting partway down keeps
+    // everything below the start, and nothing from above it.
+    const from = spans.find((s) => s.textContent.includes('SECOND'));
+    const range = document.createRange();
+    range.setStart(from, 0);
+    range.setEndAfter(spans[spans.length - 1]);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    const copied = selection.toString();
+    selection.removeAllRanges();
+
+    for (const word of ['SECOND', 'THIRD', 'FOURTH']) {
+      assert(copied.includes(word), `selecting from the second line lost the ${word} line`);
+    }
+    assert(!copied.includes('FIRST'), 'the selection reached back above where it started');
+    assert(copied.includes('\n'), 'the copied text has no line breaks');
+  } finally {
+    viewer.destroy();
+    host.remove();
+  }
+});
+
 test('a wide sheet can be panned past all four of its edges', async () => {
   const ws = await loadWorkspace(['blueprint.pdf']);
   const host = document.createElement('div');

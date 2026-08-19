@@ -17,7 +17,7 @@ import { renderPageCanvas, viewportFor } from '../core/render.js';
 import { makeMapper, totalQuarter } from '../core/geometry.js';
 import { pageSize } from '../core/workspace.js';
 import { cssFamilyFor } from '../core/fonts.js';
-import { appendOcrText } from './ocrlayer.js';
+import { appendOcrText, sortIntoReadingOrder } from './ocrlayer.js';
 import { AnnotationLayer } from './annotlayer.js';
 import { TextLayer } from '../../vendor/pdf.mjs';
 
@@ -672,6 +672,9 @@ export class PageViewer {
       }).render();
     }
     if (hasOcr) appendOcrText(layer, page, mapper.displayWidth, mapper.displayHeight);
+    // Last, so recognised words take their place among the rest rather than
+    // being tacked on after everything.
+    sortIntoReadingOrder(layer);
   }
 
   // -------------------------------------------------------------- navigation

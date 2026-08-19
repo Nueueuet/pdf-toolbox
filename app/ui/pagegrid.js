@@ -14,7 +14,7 @@ import { makeMapper, totalQuarter } from '../core/geometry.js';
 import { numberPrompt } from './modal.js';
 import { contextMenu } from './menu.js';
 import { ocrStatusOf, OCR_STATUS_LABEL } from '../tools/ocr.js';
-import { appendOcrText } from './ocrlayer.js';
+import { appendOcrText, sortIntoReadingOrder } from './ocrlayer.js';
 import { TextLayer } from '../../vendor/pdf.mjs';
 
 const THUMB_CONCURRENCY = 3;
@@ -695,6 +695,9 @@ PageGrid.prototype.addThumbTextLayer = async function addThumbTextLayer(page, sh
     }).render();
   }
   if (hasOcr) appendOcrText(layer, page, mapper.displayWidth, mapper.displayHeight);
+  // What a drag across the page picks up follows the order these are in, and a
+  // PDF stores its words in the order they were drawn rather than read.
+  sortIntoReadingOrder(layer);
   if (!shell.isConnected) return;
 
   Object.assign(shell.dataset, {
