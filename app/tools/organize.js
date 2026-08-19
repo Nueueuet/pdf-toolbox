@@ -366,6 +366,59 @@ const remove = {
   },
 };
 
+// ------------------------------------------------------------------ mirror
+
+/*
+ * Its own entry in the rail rather than a corner of Rotate.
+ *
+ * Turning and reflecting are different things — one is a property a PDF carries
+ * and the other has to be redrawn — and looking for "mirror" inside a tool
+ * called "rotate" is not where anyone looks first.
+ */
+const mirror = {
+  id: 'mirror',
+  label: 'Mirror',
+  group: 'Organise',
+  mode: 'any',
+  icon: 'M12 3v18 M6 8 3 12l3 4Z M18 8l3 4-3 4Z',
+  blurb: 'Flip pages left to right, or top to bottom.',
+  panel(ctx) {
+    const scope = pageScope(ctx);
+
+    const flip = (axis) => {
+      const pages = scope.resolve();
+      if (!pages) return;
+      const key = axis === 'x' ? 'flipX' : 'flipY';
+      ctx.commit(axis === 'x' ? 'Mirror across' : 'Mirror down', () => {
+        for (const page of pages) page[key] = !page[key];
+      });
+    };
+
+    const reset = () => {
+      const pages = scope.resolve();
+      if (!pages) return;
+      ctx.commit('Undo mirroring', () => {
+        for (const page of pages) {
+          page.flipX = false;
+          page.flipY = false;
+        }
+      });
+    };
+
+    return h('div',
+      section('Pages', scope.el),
+      section('Flip',
+        buttonRow(
+          primary('⇄ Left to right', { onclick: () => flip('x') }),
+          primary('⇅ Top to bottom', { onclick: () => flip('y') }),
+        ),
+        buttonRow(button('Back to normal', { onclick: reset })),
+        hint('Pressing the same one again turns it back. A mirrored page is redrawn as an image, so its text stops being selectable — a quarter turn does not do that.'),
+      ),
+    );
+  },
+};
+
 // ------------------------------------------------------------------ rotate
 
 const rotate = {
@@ -399,15 +452,6 @@ const rotate = {
       });
     };
 
-    const flip = (axis) => {
-      const pages = scope.resolve();
-      if (!pages) return;
-      const key = axis === 'x' ? 'flipX' : 'flipY';
-      ctx.commit(axis === 'x' ? 'Mirror across' : 'Mirror down', () => {
-        for (const page of pages) page[key] = !page[key];
-      });
-    };
-
     return h('div',
       section('Pages', scope.el),
       section('Quarter turns',
@@ -416,13 +460,6 @@ const rotate = {
           button('↻ 90° right', { onclick: () => quarter(90) }),
           button('180°', { onclick: () => quarter(180) }),
         ),
-      ),
-      section('Mirror',
-        buttonRow(
-          button('⇄ Left to right', { onclick: () => flip('x') }),
-          button('⇅ Top to bottom', { onclick: () => flip('y') }),
-        ),
-        hint('Pressing the same one again turns it back. A mirrored page is redrawn as an image, so its text stops being selectable — a quarter turn does not do that.'),
       ),
       section('Any angle',
         field('Angle', angle),
@@ -527,5 +564,5 @@ function groupRemovedByFile(ws) {
   });
 }
 
-export default [merge, split, remove, rotate, crop];
+export default [merge, split, remove, rotate, mirror, crop];
 export { pageScope };

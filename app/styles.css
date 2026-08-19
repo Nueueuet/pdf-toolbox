@@ -915,6 +915,27 @@ button { font: inherit; }
 .viewer.is-panning .viewer__scroll { cursor: grabbing; }
 .viewer.is-panning .textlayer { pointer-events: none; }
 
+/*
+ * The outer two share the leftover room equally, which puts the middle group in
+ * the middle of the bar — and keeps it in the layout, so a narrow window makes
+ * everything give way together instead of one group sliding under another.
+ */
+.viewerbar__side {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.viewerbar__side--end { justify-content: flex-end; }
+
+.viewerbar__centre {
+  flex: none;
+  display: flex;
+  gap: 6px;
+}
+
 .viewerbar {
   display: flex;
   align-items: center;
@@ -1222,6 +1243,7 @@ button { font: inherit; }
 /* ------------------------------------------------------------------- panel */
 
 .panel {
+  position: relative;
   width: var(--panel-w);
   display: flex;
   flex-direction: column;
@@ -1229,6 +1251,40 @@ button { font: inherit; }
   border-left: 1px solid var(--line);
   overflow: hidden;
 }
+
+/*
+ * The handle for widening the panel. A thin strip on its edge, reaching a little
+ * further than it looks so it can be caught without aiming, and highlighting
+ * only once the pointer is on it.
+ */
+.panel__grip {
+  position: absolute;
+  left: -3px;
+  top: 0;
+  bottom: 0;
+  width: 9px;
+  cursor: col-resize;
+  z-index: 3;
+}
+
+.panel__grip::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: transparent;
+  transition: background .12s;
+}
+
+.panel__grip:hover::after,
+.panel__grip:focus-visible::after,
+.app.is-resizing .panel__grip::after { background: var(--blue); }
+
+/* While dragging, nothing else may take the pointer or start selecting text. */
+.app.is-resizing { cursor: col-resize; user-select: none; }
+.app.is-resizing .panel__body { pointer-events: none; }
 
 .panel__head {
   padding: 16px 18px 12px;

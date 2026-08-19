@@ -579,7 +579,17 @@ export class PageViewer {
     try {
       const scale = this.effectiveZoom();
       const pixelScale = Math.min(4, scale * (window.devicePixelRatio || 1));
-      const { canvas } = await renderPageCanvas(this.ws, page, { scale: pixelScale });
+      /*
+       * Without annotations: every one of them is a live box in the editing
+       * layer above, and drawing them here as well put a second, frozen copy of
+       * each on the page. Moving the real one then left the painted one behind
+       * until the next repaint caught up — one text box, two apparent copies,
+       * only one of which answered to the pointer.
+       */
+      const { canvas } = await renderPageCanvas(this.ws, page, {
+        scale: pixelScale,
+        withAnnots: false,
+      });
       if (token !== this.renderToken || !frame.isConnected) return;
 
       canvas.className = 'viewer__bitmap';
@@ -815,8 +825,16 @@ export class PageViewer {
   handleKey(event) {
     const step = 120;
     switch (event.key) {
-      case 'ArrowRight': return this.layout === 'single' ? this.step(1) : this.pageDown(1);
-      case 'ArrowLeft': return this.layout === 'single' ? this.step(-1) : this.pageDown(-1);
+      /*
+       * Sideways moves along the page while there is page to move along, and
+       * turns to the next one only once there is not.
+       *
+       * Zoomed in, the obvious meaning of "right" is the part of the sheet just
+       * out of view, not the next sheet — and turning the page there also reset
+       * the scroll, which read as the document lurching diagonally away.
+       */
+      case 'ArrowRight': return this.scrollSideways(1, step);
+      case 'ArrowLeft': return this.scrollSideways(-1, step);
       case 'PageDown': return this.pageDown(1);
       case 'PageUp': return this.pageDown(-1);
       case 'ArrowDown': this.scroller.scrollTop += step; return true;
@@ -828,6 +846,24 @@ export class PageViewer {
       case '0': this.setZoom(null); return true;
       default: return false;
     }
+  }
+
+  /**
+   * Moves across the page, and turns to the next one at its edge.
+   *
+   * @param {number} direction -1 for left, 1 for right
+   * @param {number} step how far to move, in pixels
+   */
+  scrollSideways(direction, step) {
+    const s = this.scroller;
+    const room = s.scrollWidth - s.clientWidth;
+    const atEdge = direction > 0 ? s.scrollLeft >= room - 2 : s.scrollLeft <= 2;
+
+    if (room > 2 && !atEdge) {
+      s.scrollLeft += direction * step;
+      return true;
+    }
+    return this.layout === 'single' ? this.step(direction) : this.pageDown(direction);
   }
 
   /**

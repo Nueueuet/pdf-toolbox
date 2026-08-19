@@ -41,6 +41,13 @@ const MIN_TEXT_HEIGHT = 0.008;
 
 function looksLikeWriting(region) {
   if (region.w * region.h >= MIN_REGION_AREA) return true;
+  /*
+   * A short line of writing is wider than it is tall — that is what makes it a
+   * line. Without the shape test this exemption also let through the narrow
+   * upright slivers along the edge of a scan, which are the shadow of the paper
+   * rather than anything to read.
+   */
+  if (region.w <= region.h) return false;
   return region.w >= MIN_TEXT_WIDTH && region.h >= MIN_TEXT_HEIGHT;
 }
 

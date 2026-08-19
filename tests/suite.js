@@ -989,11 +989,12 @@ test('zoom stops where the page fills the window, and steps by fifty to 400%', a
   }
 });
 
-test('left and right turn the page whether or not it is zoomed in', async () => {
+test('left and right move across the page, then on to the next one', async () => {
   /*
-   * They used to share the job with scrolling — sideways turned the page only
-   * while the whole sheet was visible, and scrolled downwards otherwise — so
-   * zooming in silently changed what the arrow keys did.
+   * Zoomed in, "right" means the part of the sheet just out of view, not the
+   * next sheet. Turning the page there also reset the scroll, so the document
+   * appeared to lurch away diagonally. Only at the edge, with nothing further to
+   * see, does sideways mean the next page.
    */
   const ws = await loadWorkspace(['report.pdf']);
   const host = document.createElement('div');
@@ -1005,28 +1006,62 @@ test('left and right turn the page whether or not it is zoomed in', async () => 
   try {
     await viewer.open(ws.pages[0]);
     viewer.setZoom(3);
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    assert(viewer.canScroll(), 'the test needs a page bigger than its window');
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    const room = viewer.scroller.scrollWidth - viewer.scroller.clientWidth;
+    assert(room > 10, 'the test needs a page wider than its window');
 
-    const first = viewer.currentPageId;
+    // Away from the edge: it travels along the page and stays on it.
+    viewer.scroller.scrollLeft = Math.round(room / 2);
+    const page = viewer.currentPageId;
+    const from = viewer.scroller.scrollLeft;
     viewer.handleKey({ key: 'ArrowRight' });
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    assert(viewer.currentPageId !== first, 'the right arrow did not turn the page while zoomed in');
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    assert(viewer.scroller.scrollLeft > from, 'the right arrow did not move along the page');
+    assert(viewer.currentPageId === page, 'the right arrow turned the page with room still to spare');
 
-    viewer.handleKey({ key: 'ArrowLeft' });
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    assert(viewer.currentPageId === first, 'the left arrow did not come back');
+    // At the right-hand edge, there is nothing left to see: on to the next page.
+    viewer.scroller.scrollLeft = room;
+    viewer.handleKey({ key: 'ArrowRight' });
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    assert(viewer.currentPageId !== page, 'at the edge the right arrow did not turn the page');
 
     // Up and down stay with the page they are on.
-    const page = viewer.currentPageId;
+    const now = viewer.currentPageId;
     const top = viewer.scroller.scrollTop;
     viewer.handleKey({ key: 'ArrowDown' });
-    assert(viewer.currentPageId === page, 'the down arrow turned the page');
+    assert(viewer.currentPageId === now, 'the down arrow turned the page');
     assert(viewer.scroller.scrollTop > top, 'the down arrow did not scroll');
   } finally {
     viewer.destroy();
     host.remove();
   }
+});
+
+test('a text box is drawn once, not painted into the page as well', async () => {
+  /*
+   * Every annotation is a live box in the editing layer over the page. Painting
+   * them into the bitmap underneath as well put a second, frozen copy of each on
+   * screen: moving the real one left the painted one sitting where it had been,
+   * so one text box looked like two, only one of which answered to the pointer.
+   */
+  const ws = await loadWorkspace(['invoice.pdf']);
+  const page = ws.pages[0];
+
+  const fingerprint = async (opts) => {
+    const { canvas } = await renderPageCanvas(ws, page, { scale: 0.4, ...opts });
+    const data = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+    let sum = 0;
+    for (let i = 0; i < data.length; i += 40) sum += data[i];
+    return sum;
+  };
+
+  const bare = await fingerprint({ withAnnots: false });
+  page.annots.push(makeAnnot({ text: 'On the page', x: 0.2, y: 0.5, w: 0.5, h: 0.12, bgColor: '#ff0000' }));
+
+  assert(await fingerprint({ withAnnots: false }) === bare,
+    'the page the viewer draws changed when a text box was added — it is being painted in twice');
+  assert(await fingerprint({ withAnnots: true }) !== bare,
+    'the thumbnail path stopped drawing annotations, and the grid has no layer to show them instead');
 });
 
 test('a wide sheet can be panned past all four of its edges', async () => {

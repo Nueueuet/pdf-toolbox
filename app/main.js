@@ -22,6 +22,8 @@ import * as storage from './core/storage.js';
 
 /** Where the shell remembers how it was left. */
 const SHELL_KEY = 'shell';
+/** How wide the options panel was dragged to. */
+const PANEL_KEY = 'panel-width';
 import { IN_EXTENSION } from './core/paths.js';
 import { makeAnnot } from './core/annots.js';
 import { PDFDocument } from '../vendor/pdf-lib.esm.js';
@@ -121,6 +123,9 @@ class App {
     storage.get(SHELL_KEY, {}).then((shell) => {
       if (shell?.compact) this.setCompact(true, { remember: false });
     });
+    storage.get(PANEL_KEY, null).then((width) => {
+      if (typeof width === 'number') this.setPanelWidth?.(width, { remember: false });
+    });
 
     // A reading layout is a habit, not a per-document choice, so it is restored
     // before the first document is even open.
@@ -181,6 +186,64 @@ class App {
     } finally {
       this.showOpening(null);
     }
+  }
+
+  /**
+   * Dragging the edge of the options panel to widen it.
+   *
+   * There because a file name is only useful when all of it is on screen, and
+   * the lists in there are full of them. Remembered with the rest of the shell:
+   * how wide it should be is a property of the screen it is used on.
+   */
+  wirePanelResize() {
+    const grip = $('#panelGrip');
+    const MIN = 280;
+
+    /*
+     * Never more than a share of the window.
+     *
+     * A fixed ceiling is not enough on a small screen: dragged out to 700px
+     * there, the bar above the document is left too narrow for the controls in
+     * it, and the centred pair ends up under the ones beside it.
+     */
+    const maxWidth = () => Math.min(720, Math.round(window.innerWidth * 0.45));
+
+    const setWidth = (px, { remember = true } = {}) => {
+      const width = Math.round(Math.min(maxWidth(), Math.max(MIN, px)));
+      document.documentElement.style.setProperty('--panel-w', `${width}px`);
+      if (this.mode === 'viewer') this.viewer.relayout();
+      if (remember) storage.set(PANEL_KEY, width);
+      return width;
+    };
+    this.setPanelWidth = setWidth;
+
+    grip.addEventListener('pointerdown', (event) => {
+      event.preventDefault();
+      grip.setPointerCapture(event.pointerId);
+      $('#app').classList.add('is-resizing');
+      const startX = event.clientX;
+      const startWidth = this.el.panel.getBoundingClientRect().width;
+
+      // Rightwards makes it narrower: the panel is on the right, so dragging its
+      // edge that way takes room away from it.
+      const onMove = (move) => setWidth(startWidth - (move.clientX - startX), { remember: false });
+      const onUp = () => {
+        grip.removeEventListener('pointermove', onMove);
+        grip.removeEventListener('pointerup', onUp);
+        $('#app').classList.remove('is-resizing');
+        setWidth(this.el.panel.getBoundingClientRect().width);
+      };
+      grip.addEventListener('pointermove', onMove);
+      grip.addEventListener('pointerup', onUp);
+    });
+
+    // Reachable without a pointer, for the same reason every other control is.
+    grip.addEventListener('keydown', (event) => {
+      const by = { ArrowLeft: 24, ArrowRight: -24 }[event.key];
+      if (by === undefined) return;
+      event.preventDefault();
+      setWidth(this.el.panel.getBoundingClientRect().width + by);
+    });
   }
 
   /**
@@ -426,6 +489,7 @@ class App {
     }
 
     $('#settingsBtn').addEventListener('click', () => settingsDialog());
+    this.wirePanelResize();
     $('#compactBtn').addEventListener('click', () => this.setCompact(!this.compact));
     $('#fullscreenBtn').addEventListener('click', () => this.toggleFullscreen());
     // Leaving full screen by the Escape key or F11 has to move the button too.
@@ -756,8 +820,19 @@ class App {
      * already on a page.
      */
     if (tool.mode === 'viewer') {
-      this.currentPageId = (page ?? this.currentPage())?.id ?? null;
-      this.showViewer();
+      const wanted = (page ?? this.currentPage())?.id ?? null;
+      /*
+       * Only actually go there if we are not there already.
+       *
+       * showViewer re-opens the document from scratch, which throws away the
+       * scroll position and repaints every page. Doing that on every tool change
+       * meant stepping from Write to Stamps jumped back to the top of the page
+       * and flashed the whole thing white — for a change of panel, on a page
+       * that was already in front of you.
+       */
+      const staying = this.mode === 'viewer' && (page == null || wanted === this.currentPageId);
+      this.currentPageId = wanted;
+      if (!staying) this.showViewer();
       this.viewer.setEditMode(tool.editorMode ?? 'select');
     } else if (tool.mode === 'any') {
       if (this.mode === 'viewer') this.viewer.setEditMode('select');
