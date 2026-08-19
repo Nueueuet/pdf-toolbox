@@ -729,20 +729,15 @@ export class PageViewer {
       }
 
       /*
-       * A tilt wheel, which reports sideways movement on its own.
-       *
-       * The browser scrolls a scroller with room to spare by itself, so this
-       * only has to answer for the case where there is none: at that point the
-       * gesture was simply being swallowed. Turning the page is what tilting
-       * means when there is nowhere left to go sideways.
+       * A tilt wheel moves the page sideways, and only sideways — the same thing
+       * Shift and the wheel do. It never turns the page: tilting is a way of
+       * looking along a wide sheet, and having it jump to the next page at the
+       * margin would take the document away mid-sentence.
        */
       if (Math.abs(event.deltaX) > Math.abs(event.deltaY)) {
-        if (canScrollSideways) return; // the browser handles it
-        if (this.layout !== 'single') return;
+        if (!canScrollSideways) return;
         event.preventDefault();
-        const now = performance.now();
-        if (now - (this.lastPageTurn ?? 0) < 220) return;
-        if (this.step(event.deltaX > 0 ? 1 : -1)) this.lastPageTurn = now;
+        this.scroller.scrollLeft += event.deltaX;
         return;
       }
 
