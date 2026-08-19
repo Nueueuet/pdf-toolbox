@@ -34,6 +34,10 @@ const convert = {
         { value: '150', label: '150 dpi — good' },
         { value: '300', label: '300 dpi — print' },
         { value: '600', label: '600 dpi — very large files' },
+        // An A4 page at this comes out around 9900 by 14000 pixels, which is
+        // past what some browsers will allocate a canvas for. Worth offering,
+        // worth saying so.
+        { value: '1200', label: '1200 dpi — huge; may fail on big pages' },
       ],
     });
     const quality = slider({ value: 85, min: 40, max: 100, step: 1, format: (v) => `${v}%` });
