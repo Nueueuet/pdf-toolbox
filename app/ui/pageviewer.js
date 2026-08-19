@@ -39,6 +39,44 @@ const PAGE_GAP = 18;
 /** How far beyond the window a page is drawn, so scrolling meets a ready page. */
 const PAINT_MARGIN = 400;
 
+/**
+ * Places a mark over a run of the page's text — an inspection box or one of the
+ * runs offered for picking.
+ *
+ * A run that is not written straight across the page gets its mark turned with
+ * it. The upright box such a run fits inside is enormous — a watermark set
+ * corner to corner fits inside most of the sheet — and drawn as it stands it
+ * covers everything it is supposed to be pointing at, which reads as the page
+ * having been marked at its edges.
+ *
+ * Sizes are worked out from the page's own points rather than given as
+ * percentages, because a percentage of the width and a percentage of the height
+ * are different lengths: once a box is turned, the two have to agree or it comes
+ * out sheared. The layers these go on are laid out in points and scaled as a
+ * whole, so a length in points is a length on screen at any zoom.
+ */
+function markStyle(box, frame) {
+  const wide = Number(frame.dataset.w);
+  const tall = Number(frame.dataset.h);
+  const turned = box.turned;
+  if (!turned || !box.angle) {
+    return {
+      left: `${box.x * 100}%`,
+      top: `${box.y * 100}%`,
+      width: `${box.w * 100}%`,
+      height: `${box.h * 100}%`,
+    };
+  }
+  return {
+    left: `${turned.x * wide}px`,
+    top: `${turned.y * tall}px`,
+    width: `${turned.w * wide}px`,
+    height: `${turned.h * tall}px`,
+    transform: `rotate(${box.angle}deg)`,
+    transformOrigin: '0 0',
+  };
+}
+
 export class PageViewer {
   /**
    * @param {HTMLElement} root
@@ -423,12 +461,7 @@ export class PageViewer {
         // Nothing to draw a box around.
         if (box.w <= 0 || box.h <= 0) continue;
         host.appendChild(h(`div.inspectbox.inspectbox--${kind}`, {
-          style: {
-            left: `${box.x * 100}%`,
-            top: `${box.y * 100}%`,
-            width: `${box.w * 100}%`,
-            height: `${box.h * 100}%`,
-          },
+          style: markStyle(box, frame),
           title: box.text ? `Recognised: ${box.text}` : 'Text the PDF already had',
         }));
       }
@@ -526,12 +559,7 @@ export class PageViewer {
 
     const marks = runs.map((run) => {
       const mark = h('button.pickrun', { type: 'button', title: run.text.slice(0, 60) });
-      Object.assign(mark.style, {
-        left: `${run.x * 100}%`,
-        top: `${run.y * 100}%`,
-        width: `${run.w * 100}%`,
-        height: `${run.h * 100}%`,
-      });
+      Object.assign(mark.style, markStyle(run, frame));
       mark.addEventListener('pointerdown', (event) => {
         event.preventDefault();
         event.stopPropagation();

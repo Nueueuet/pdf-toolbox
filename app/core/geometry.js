@@ -100,6 +100,90 @@ export function unitScale(viewport) {
 }
 
 /**
+ * The rectangle one run of a page's text occupies, in display-space fractions.
+ *
+ * A run is measured along its own two directions, not along the page's. `width`
+ * is how far it advances in the direction it is written, which for most text is
+ * straight across the page and for some text is not: a watermark set at 45
+ * degrees, or a label printed up the left margin of a form. Adding that advance
+ * to x regardless draws the box along the bottom of the page instead of along
+ * the words — a diagonal watermark comes out as a bar wider than the page
+ * itself, and a column of upright labels as a stripe down the edge.
+ *
+ * Shared by everything that has to know where the existing words are, because
+ * two copies of this sum drifted apart once already: the inspection overlay was
+ * put right while the text picker went on drawing bars off the side of the page.
+ *
+ * @param {object} item one item from pdf.js getTextContent
+ * @param {object} viewport a pdf.js viewport at scale 1
+ * @param {{displayWidth: number, displayHeight: number}} mapper
+ */
+export function runBox(item, viewport, mapper) {
+  const [a, b, c, d, e, f] = item.transform;
+  // The size the glyphs stand at, whichever way up they are.
+  const size = Math.hypot(c, d) || item.height || 10;
+  const along = Math.hypot(a, b) || size;
+  // Unit vectors: along the writing, and up the glyphs.
+  const ux = a / along;
+  const uy = b / along;
+  const vx = c / size;
+  const vy = d / size;
+  const width = item.width || (item.str?.length ?? 1) * size * 0.5;
+
+  // The run sits on its baseline, so the box starts a little below it and
+  // reaches the ascender height above.
+  const dropX = e - vx * size * 0.25;
+  const dropY = f - vy * size * 0.25;
+  const tall = size * 1.25;
+  const corners = [
+    [dropX, dropY],
+    [dropX + ux * width, dropY + uy * width],
+    [dropX + vx * tall, dropY + vy * tall],
+    [dropX + ux * width + vx * tall, dropY + uy * width + vy * tall],
+  ].map(([px, py]) => viewport.convertToViewportPoint(px, py));
+
+  const xs = corners.map(([px]) => px);
+  const ys = corners.map(([, py]) => py);
+  const left = Math.min(...xs);
+  const top = Math.min(...ys);
+
+  /*
+   * Two rectangles come out of this, and they are different things.
+   *
+   * The upright one is the smallest box the run fits inside, which is what
+   * masking and hit-testing need. For a watermark set across the page that box
+   * is enormous — most of the sheet — and drawn on screen it says nothing about
+   * where the words are. So the run's own rectangle is given too: the same
+   * shape, turned the way the writing is, to be drawn about its top-left corner.
+   * For ordinary upright text the two are identical and the angle is zero.
+   */
+  const [startX, startY] = corners[0];
+  const [endX, endY] = corners[1];
+  const [aboveX, aboveY] = corners[2];
+  const angle = (Math.atan2(endY - startY, endX - startX) * 180) / Math.PI;
+  const runLength = Math.hypot(endX - startX, endY - startY);
+  const runHeight = Math.hypot(aboveX - startX, aboveY - startY);
+
+  return {
+    x: left / mapper.displayWidth,
+    y: top / mapper.displayHeight,
+    w: (Math.max(...xs) - left) / mapper.displayWidth,
+    h: (Math.max(...ys) - top) / mapper.displayHeight,
+    size,
+    angle,
+    // Lengths divided by the page so they travel as fractions like everything
+    // else; whoever draws them multiplies by the page's own size again, which
+    // makes them true lengths rather than a width read off the wrong side.
+    turned: {
+      x: aboveX / mapper.displayWidth,
+      y: aboveY / mapper.displayHeight,
+      w: runLength / mapper.displayWidth,
+      h: runHeight / mapper.displayHeight,
+    },
+  };
+}
+
+/**
  * A crop drawn on a page that is already cropped.
  *
  * The rectangle is drawn on what the page shows, and what a page shows is

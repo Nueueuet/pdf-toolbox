@@ -16,7 +16,7 @@
  * original, and the tool says so rather than pretending otherwise.
  */
 import { viewportFor } from './render.js';
-import { makeMapper } from './geometry.js';
+import { makeMapper, runBox } from './geometry.js';
 import { renderPageCanvas } from './render.js';
 
 /** The three standard families a PDF font can be matched to. */
@@ -48,23 +48,21 @@ export async function readableRuns(ws, page) {
   for (const item of content.items) {
     if (!item.str?.trim()) continue;
     const style = content.styles?.[item.fontName];
-    // transform[0] is the horizontal scale the glyphs are drawn at, which for
-    // ordinary upright text is the font size in points.
-    const size = Math.abs(item.transform[0]) || item.height || 10;
-    const width = item.width || item.str.length * size * 0.5;
-    const x = item.transform[4];
-    const y = item.transform[5];
-
-    const [ax, ay] = viewport.convertToViewportPoint(x, y - size * 0.25);
-    const [bx, by] = viewport.convertToViewportPoint(x + width, y + size * 0.95);
+    // Measured the same way the inspection overlay measures, so a watermark set
+    // at an angle offers a box over the words rather than a bar across the page.
+    const { x, y, w, h, size, angle, turned } = runBox(item, viewport, mapper);
 
     const name = `${style?.fontFamily ?? ''}`.toLowerCase();
     runs.push({
       text: item.str,
-      x: Math.min(ax, bx) / mapper.displayWidth,
-      y: Math.min(ay, by) / mapper.displayHeight,
-      w: Math.abs(bx - ax) / mapper.displayWidth,
-      h: Math.abs(by - ay) / mapper.displayHeight,
+      x,
+      y,
+      w,
+      h,
+      // The upright box is where a replacement text box would go; the turned one
+      // is how the run is offered on screen.
+      angle,
+      turned,
       size,
       family: familyFor(style),
       bold: name.includes('bold'),

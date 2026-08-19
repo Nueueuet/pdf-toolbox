@@ -1322,6 +1322,37 @@ test('a run set at an angle is boxed along the words, not across the page', asyn
     'the label printed up the margin should be boxed taller than it is wide');
   assert(boxes.some((box) => box.w > box.h * 2 && box.w < 0.5),
     'the ordinary line should still be boxed as a line');
+
+  /*
+   * The same sum, in the other place that needs it. These were two copies once,
+   * and only one of them was put right: the inspection overlay stopped drawing
+   * bars off the side of the page while the text picker carried on doing it,
+   * which is what a report of "the stripe at the edge is still there" turned out
+   * to be.
+   */
+  const runs = await readableRuns(ws, ws.pages[0]);
+  assert(runs.length >= 3, `the picker should offer all three runs, got ${runs.length}`);
+  for (const run of runs) {
+    assert(run.x >= -0.01 && run.y >= -0.01 && run.x + run.w <= 1.01 && run.y + run.h <= 1.01,
+      `the picker offered a box off the page for "${run.text.slice(0, 20)}": x ${run.x.toFixed(2)} w ${run.w.toFixed(2)}`);
+  }
+  const upright = runs.find((run) => run.text.startsWith('Ubertrag'));
+  assert(upright && upright.h > upright.w * 2, 'the upright label should be offered as an upright box');
+
+  /*
+   * And the shape that actually gets drawn. The upright box a diagonal
+   * watermark fits inside is most of the sheet, which covers the very thing the
+   * marks are pointing at; the mark is turned with the writing instead.
+   */
+  const slanted = runs.find((run) => run.text.startsWith('unverbindlicher'));
+  assert(slanted, 'the watermark run should be there');
+  assert(Math.abs(slanted.angle) > 30, `the watermark should be marked at an angle, got ${slanted.angle}`);
+  const box = slanted.w * slanted.h;
+  const band = slanted.turned.w * slanted.turned.h;
+  assert(band < box / 3, `the turned mark should be a band, not a square: ${band.toFixed(3)} against ${box.toFixed(3)}`);
+  assert(Math.abs(upright.angle) > 30, 'the label printed up the margin should be marked at an angle too');
+  const straight = runs.find((run) => run.text.startsWith('an ordinary'));
+  assert(Math.abs(straight.angle) < 0.001, `an ordinary line should not be turned, got ${straight.angle}`);
 });
 
 test('a deep crop lands where the rectangle was', async () => {

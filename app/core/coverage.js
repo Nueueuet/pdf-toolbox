@@ -13,7 +13,7 @@
  * whatever ink is left over is what OCR should look at.
  */
 import { viewportFor } from './render.js';
-import { makeMapper } from './geometry.js';
+import { makeMapper, runBox } from './geometry.js';
 import { renderPageCanvas } from './render.js';
 
 /** Pixel size of one grid cell when hunting for leftover ink, at ANALYSIS_DPI. */
@@ -96,54 +96,16 @@ export async function existingTextBoxes(ws, page) {
   const boxes = [];
   for (const item of content.items) {
     if (!item.str || !item.str.trim()) continue;
-
     /*
-     * A run is measured along its own two directions, not along the page's.
-     *
-     * `width` is how far the run advances in the direction it is written, which
-     * for most text is straight across the page and for some text is not: a
-     * watermark set at 45 degrees, or a label printed up the left margin of a
-     * form. Adding that advance to x regardless drew the box along the bottom of
-     * the page instead of along the words — a diagonal watermark came out as a
-     * bar wider than the page itself, and a column of upright labels came out as
-     * a stripe down the margin. Those bars are what appeared as marks around the
-     * edge of the page, and where one of them lay across the page it also told
-     * the recogniser that everything underneath already had text, so that part
-     * was skipped.
+     * Where one of these boxes lands decides two things: what the inspection
+     * overlay draws, and which ink the recogniser is told already has text over
+     * it. A box drawn along the wrong axis therefore both marks the page in the
+     * wrong place and declares a band of it as already read, so whatever sits
+     * under that band is skipped.
      */
-    const [a, b, c, d, e, f] = item.transform;
-    const rise = Math.hypot(c, d) || item.height || 10;
-    const along = Math.hypot(a, b) || rise;
-    // Unit vectors: along the writing, and up the glyphs.
-    const ux = a / along;
-    const uy = b / along;
-    const vx = c / rise;
-    const vy = d / rise;
-    const width = item.width || item.str.length * rise * 0.5;
-
-    // The run sits on its baseline, so the box starts a little below it and
-    // reaches the ascender height above.
-    const dropX = e - vx * rise * 0.25;
-    const dropY = f - vy * rise * 0.25;
-    const tall = rise * 1.25;
-    const corners = [
-      [dropX, dropY],
-      [dropX + ux * width, dropY + uy * width],
-      [dropX + vx * tall, dropY + vy * tall],
-      [dropX + ux * width + vx * tall, dropY + uy * width + vy * tall],
-    ].map(([px, py]) => viewport.convertToViewportPoint(px, py));
-
-    const xs = corners.map(([px]) => px);
-    const ys = corners.map(([, py]) => py);
-    const left = Math.min(...xs);
-    const top = Math.min(...ys);
-
-    boxes.push({
-      x: left / mapper.displayWidth,
-      y: top / mapper.displayHeight,
-      w: (Math.max(...xs) - left) / mapper.displayWidth,
-      h: (Math.max(...ys) - top) / mapper.displayHeight,
-    });
+    const { x, y, w, h, angle, turned } = runBox(item, viewport, mapper);
+    // The upright box masks; the turned one is what gets drawn.
+    boxes.push({ x, y, w, h, angle, turned });
   }
   return boxes;
 }

@@ -136,12 +136,25 @@ export class PageGrid {
       ctx.strokeStyle = stroke;
       ctx.lineWidth = 1;
       for (const box of list) {
-        const x = box.x * width;
-        const y = box.y * height;
-        const w = Math.max(1, box.w * width);
-        const hgt = Math.max(1, box.h * height);
-        ctx.fillRect(x, y, w, hgt);
-        ctx.strokeRect(x + 0.5, y + 0.5, w - 1, hgt - 1);
+        // A run written at an angle gets its mark turned with it. Drawn as the
+        // upright box it fits inside, a watermark set corner to corner covers
+        // most of the thumbnail and hides what the marks are there to show.
+        const turned = box.angle ? box.turned : null;
+        const x = (turned ?? box).x * width;
+        const y = (turned ?? box).y * height;
+        const w = Math.max(1, (turned ? turned.w * width : box.w * width));
+        const hgt = Math.max(1, (turned ? turned.h * height : box.h * height));
+        ctx.save();
+        if (turned) {
+          ctx.translate(x, y);
+          ctx.rotate((box.angle * Math.PI) / 180);
+          ctx.fillRect(0, 0, w, hgt);
+          ctx.strokeRect(0.5, 0.5, w - 1, hgt - 1);
+        } else {
+          ctx.fillRect(x, y, w, hgt);
+          ctx.strokeRect(x + 0.5, y + 0.5, w - 1, hgt - 1);
+        }
+        ctx.restore();
       }
     }
     shell.appendChild(layer);
