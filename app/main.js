@@ -442,6 +442,8 @@ class App {
         pageInput.blur();
       }
     });
+    $('#rotateLeft').addEventListener('click', () => this.turnCurrentPage(-90));
+    $('#rotateRight').addEventListener('click', () => this.turnCurrentPage(90));
     $('#viewerZoomIn').addEventListener('click', () => this.viewer.zoomBy(1));
     $('#viewerZoomOut').addEventListener('click', () => this.viewer.zoomBy(-1));
     $('#viewerFit').addEventListener('click', () => {
@@ -848,6 +850,20 @@ class App {
     // Left alone while it is being typed into, or the caret jumps mid-entry.
     if (document.activeElement !== input) input.value = index >= 0 ? String(index + 1) : '';
     $('#viewerPageTotal').textContent = `of ${this.ws.pageCount}`;
+  }
+
+  /**
+   * Turns the page being read, from the bar above it.
+   *
+   * Only this page: the tool is where you go to turn a range of them, and a
+   * button sitting beside the page number can only sensibly mean that page.
+   */
+  turnCurrentPage(delta) {
+    const page = this.currentPage();
+    if (!page) return;
+    this.ws.commit(`Rotate ${delta > 0 ? 'right' : 'left'}`, () => {
+      page.rotate = normalizeQuarter(page.rotate + delta);
+    });
   }
 
   /** Jumps to a page number typed into the viewer's page field. */

@@ -21,6 +21,10 @@ export function needsRaster(ws, page, opts) {
   if (page.rasterId) return true;
   if (page.bg && page.bg.mode !== 'none') return true;
   if ((page.angle ?? 0) % 360 !== 0) return true;
+  // A mirrored page has to be redrawn: a quarter turn is a property PDF carries,
+  // a reflection is not, and turning one into a negative content-stream matrix
+  // would move every glyph and annotation on the page with it.
+  if (page.flipX || page.flipY) return true;
   return ws.source(page)?.kind !== 'pdf';
 }
 

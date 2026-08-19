@@ -8,7 +8,7 @@
  */
 import { Workspace, normalizeQuarter } from '../app/core/workspace.js';
 import { TOOLS } from '../app/tools/index.js';
-import { buildPdf } from '../app/core/export.js';
+import { buildPdf, needsRaster } from '../app/core/export.js';
 import { renderPageCanvas } from '../app/core/render.js';
 import { makeAnnot, applyMark } from '../app/core/annots.js';
 import { wrapText } from '../app/core/fonts.js';
@@ -1136,6 +1136,48 @@ test('rotating a page turns it in the viewer, without leaving it', async () => {
     viewer.destroy();
     host.remove();
   }
+});
+
+test('mirroring a page really reverses it, and survives being saved', async () => {
+  const ws = await loadWorkspace(['mixed-pages.pdf']);
+  const page = ws.pages[0];
+
+  const pixels = async () => {
+    const { canvas } = await renderPageCanvas(ws, page, { scale: 0.5 });
+    const ctx = canvas.getContext('2d');
+    return { data: ctx.getImageData(0, 0, canvas.width, canvas.height), w: canvas.width, h: canvas.height };
+  };
+
+  const plain = await pixels();
+  page.flipX = true;
+  const flipped = await pixels();
+
+  assert(flipped.w === plain.w && flipped.h === plain.h, 'mirroring changed the page size');
+
+  /*
+   * Every pixel has to be its opposite number across the page. Sampling rather
+   * than comparing all of them: a handful of rows through the middle is enough
+   * to tell a mirrored page from an unchanged one, and cheap.
+   */
+  const at = (img, x, y) => {
+    const i = (y * img.w + x) * 4;
+    return [img.data.data[i], img.data.data[i + 1], img.data.data[i + 2]].join(',');
+  };
+  let compared = 0;
+  for (let y = 4; y < plain.h; y += Math.floor(plain.h / 12)) {
+    for (let x = 0; x < plain.w; x += Math.floor(plain.w / 12)) {
+      assert(at(plain, x, y) === at(flipped, plain.w - 1 - x, y),
+        `pixel ${x},${y} is not the mirror of ${plain.w - 1 - x},${y}`);
+      compared++;
+    }
+  }
+  assert(compared > 50, `only ${compared} pixels were compared`);
+
+  // And the saved file has to show it too, which means it may not stay vector.
+  assert(needsRaster(ws, page, {}), 'a mirrored page was left as vector, which cannot show a reflection');
+  const bytes = await buildPdf(ws, [page], {});
+  const doc = await pdfjsLib.getDocument({ data: bytes.slice() }).promise;
+  assert(doc.numPages === 1, 'the mirrored page did not survive saving');
 });
 
 test('saving a range of pages keeps their text selectable', async () => {

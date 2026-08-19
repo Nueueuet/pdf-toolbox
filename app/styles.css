@@ -1049,6 +1049,32 @@ button { font: inherit; }
 .editor__overlay .crop__layer { pointer-events: auto; }
 
 /*
+ * The stamp riding the pointer. Deliberately see-through and dashed: it is a
+ * question about where something will go, not a thing that is there yet.
+ */
+.viewer.is-placing .viewer__scroll { cursor: copy; }
+.viewer.is-placing .textlayer { pointer-events: none; }
+
+.ghost {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  opacity: .65;
+  outline: 1px dashed var(--blue);
+  outline-offset: -1px;
+  pointer-events: none;
+}
+
+.ghost__text {
+  padding: 0 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/*
  * The middle of a box is text; only the band around the border moves it. The
  * cursor has to say which is which, or the box feels like it ignores clicks.
  */
@@ -1398,6 +1424,22 @@ button { font: inherit; }
 }
 
 .filerow__meta, .partrow__meta { font-size: 12px; color: var(--ink-faint); white-space: nowrap; }
+
+/* The part name is typed into, but reads as a label until you go near it. */
+input.partrow__name {
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 3px 6px;
+  background: transparent;
+  font-family: inherit;
+  color: var(--ink);
+}
+input.partrow__name:hover { background: var(--line-soft); }
+input.partrow__name:focus {
+  outline: none;
+  background: var(--card);
+  border-color: var(--blue);
+}
 
 .pill {
   padding: 2px 8px;

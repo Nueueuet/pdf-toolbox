@@ -16,6 +16,7 @@ import { h, clear, icon } from '../util/dom.js';
 import { renderPageCanvas, viewportFor } from '../core/render.js';
 import { makeMapper, totalQuarter } from '../core/geometry.js';
 import { pageSize } from '../core/workspace.js';
+import { cssFamilyFor } from '../core/fonts.js';
 import { appendOcrText } from './ocrlayer.js';
 import { AnnotationLayer } from './annotlayer.js';
 import { TextLayer } from '../../vendor/pdf.mjs';
@@ -329,6 +330,77 @@ export class PageViewer {
     for (const [id, layer] of this.layers) {
       layer.setMode(this.editMode === 'crop' && id === this.currentPageId ? 'crop' : 'select');
     }
+  }
+
+  /**
+   * Turns the pointer into the thing about to be placed.
+   *
+   * A stamp knows its own size, so the shape following the cursor is that size
+   * on that page at that zoom — you can see whether it will fit before letting
+   * go of it, rather than dropping it and dragging it about afterwards.
+   *
+   * @param {object} annot the annotation to place, used for its size and looks
+   * @param {(page: object, at: {x: number, y: number}) => void} onPlace given
+   *   the page landed on and the top-left corner as fractions of it
+   */
+  armPlacement(annot, onPlace) {
+    this.disarmPlacement();
+    this.root.classList.add('is-placing');
+
+    const ghost = h('div.ghost', h('span.ghost__text', String(annot.text ?? '').split('\n')[0]));
+    Object.assign(ghost.style, {
+      width: `${annot.w * 100}%`,
+      height: `${annot.h * 100}%`,
+      background: annot.bgColor ?? 'transparent',
+      color: annot.color,
+      fontSize: `${annot.size}px`,
+      fontFamily: cssFamilyFor(annot.family),
+      border: annot.border?.width > 0 ? `${annot.border.width}px solid ${annot.border.color}` : '',
+    });
+
+    // Where the corner goes if the cursor is the middle of the stamp, which is
+    // how it reads when it is stuck to the pointer.
+    const corner = (event, frame) => {
+      const box = frame.getBoundingClientRect();
+      return {
+        x: (event.clientX - box.left) / box.width - annot.w / 2,
+        y: (event.clientY - box.top) / box.height - annot.h / 2,
+      };
+    };
+
+    const onMove = (event) => {
+      const frame = event.target.closest?.('.viewer__page');
+      if (!frame) return ghost.remove();
+      const overlay = frame.querySelector('.viewer__overlay');
+      if (ghost.parentElement !== overlay) overlay.appendChild(ghost);
+      const at = corner(event, frame);
+      ghost.style.left = `${at.x * 100}%`;
+      ghost.style.top = `${at.y * 100}%`;
+    };
+
+    const onClick = (event) => {
+      const frame = event.target.closest?.('.viewer__page');
+      if (!frame) return;
+      const page = this.ws.pageById(frame.dataset.id);
+      if (!page) return;
+      event.preventDefault();
+      event.stopPropagation();
+      onPlace(page, corner(event, frame));
+    };
+
+    this.scroller.addEventListener('pointermove', onMove);
+    this.scroller.addEventListener('pointerdown', onClick, { capture: true });
+    this.placement = () => {
+      ghost.remove();
+      this.root.classList.remove('is-placing');
+      this.scroller.removeEventListener('pointermove', onMove);
+      this.scroller.removeEventListener('pointerdown', onClick, { capture: true });
+    };
+  }
+
+  disarmPlacement() {
+    this.placement?.();
+    this.placement = null;
   }
 
   /*

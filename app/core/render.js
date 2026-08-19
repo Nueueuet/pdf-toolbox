@@ -62,6 +62,11 @@ export async function renderPageCanvas(ws, page, { scale = 1, withAnnots = true,
 
   if (page.bg && page.bg.mode !== 'none') applyBackground(ctx, canvas, page.bg);
 
+  // Mirroring happens to the finished page rather than to each way of drawing
+  // one, so a scan, an image and a PDF page all flip identically — and it lands
+  // after cropping, which is what makes it mirror the page you can see.
+  if (page.flipX || page.flipY) flipCanvas(ctx, canvas, page);
+
   if (withAnnots && page.annots.length) {
     // Annotations are stored relative to the *full* page so that changing the
     // crop never drags them around; shift into the crop window to draw them.
@@ -109,6 +114,28 @@ async function renderPdfPage(ctx, pdfPage, page, mapper, scale, signal, intent) 
       0, 0, ctx.canvas.width, ctx.canvas.height,
     );
   }
+}
+
+/**
+ * Mirrors what has been drawn so far, in place.
+ *
+ * Through a copy rather than by drawing the canvas onto itself: a canvas used as
+ * its own source while a transform is active gives an undefined result in some
+ * browsers, and a torn image in others.
+ */
+function flipCanvas(ctx, canvas, page) {
+  const copy = document.createElement('canvas');
+  copy.width = canvas.width;
+  copy.height = canvas.height;
+  copy.getContext('2d').drawImage(canvas, 0, 0);
+
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.translate(page.flipX ? canvas.width : 0, page.flipY ? canvas.height : 0);
+  ctx.scale(page.flipX ? -1 : 1, page.flipY ? -1 : 1);
+  ctx.drawImage(copy, 0, 0);
+  ctx.restore();
 }
 
 function drawRotatedBitmap(ctx, bitmap, page, mapper, scale) {

@@ -275,16 +275,50 @@ const stamps = {
       }
     };
 
-    const insert = (stamp) => {
-      const page = ctx.currentPage();
-      if (!page) return toast('Open a page first', { tone: 'error' });
-      const annot = makeAnnot({ ...stamp.annot, role: 'stamp', stampId: stamp.id });
+    /*
+     * Two ways to put a stamp down, because they answer different questions.
+     *
+     * "Where it was saved" is for a mark that belongs in the same corner of
+     * every page — a signature block, an approval. "Where I click" is for one
+     * that goes somewhere different each time, and there the size matters before
+     * you commit to it, which is why the pointer carries the stamp's real
+     * footprint while you look for a gap.
+     */
+    const byClick = checkbox({ label: 'Place where I click', checked: false });
+
+    const put = (stamp, page, at) => {
+      const annot = makeAnnot({ ...stamp.annot, ...at, role: 'stamp', stampId: stamp.id });
       ctx.commit(`Insert ${stamp.name}`, () => page.annots.push(annot));
       ctx.editor.drawOverlay();
       // A stamp arrives with its wording already right, so the caret goes to the
       // end rather than selecting it all.
       ctx.editor.focusText(annot, { at: 'end' });
     };
+
+    const insert = (stamp) => {
+      const page = ctx.currentPage();
+      if (!page) return toast('Open a page first', { tone: 'error' });
+
+      if (!byClick.checked) return put(stamp, page, {});
+
+      const preview = makeAnnot({ ...stamp.annot });
+      ctx.app.viewer.armPlacement(preview, (target, at) => {
+        ctx.app.viewer.disarmPlacement();
+        put(stamp, target, at);
+      });
+      toast(`Click where “${stamp.name}” should go — Escape to stop`, { timeout: 6000 });
+    };
+
+    // Leaving the tool, or pressing Escape, must not leave a stamp stuck to the
+    // pointer with no way to shake it off.
+    const stopPlacing = (event) => {
+      if (event.key === 'Escape') ctx.app.viewer.disarmPlacement();
+    };
+    window.addEventListener('keydown', stopPlacing);
+    ctx.onClose(() => {
+      window.removeEventListener('keydown', stopPlacing);
+      ctx.app.viewer.disarmPlacement();
+    });
 
     const rename = async (stamp) => {
       const name = await modal({
@@ -351,7 +385,9 @@ const stamps = {
     render();
 
     return h('div',
-      section('Your stamps', list),
+      section('Your stamps', list, byClick,
+        hint('Off, a stamp lands where it was saved. On, the pointer carries it at its real size and a click puts it down.'),
+      ),
       section('Selected box', props.el),
       section(null, buttonRow(
         primary('Save selection as new stamp', { onclick: saveCurrent }),

@@ -2,7 +2,7 @@
 import { h, clear } from '../util/dom.js';
 import {
   section, field, hint, button, primary, buttonRow, rangeField, numberInput,
-  slider, checkbox, select,
+  slider, checkbox, select, textInput,
 } from '../ui/controls.js';
 import { parseRange, formatRange } from '../util/ranges.js';
 import { buildPdf } from '../core/export.js';
@@ -64,6 +64,19 @@ const merge = {
   panel(ctx) {
     const list = h('div.filelist');
 
+    const outputName = textInput({
+      value: baseName(ctx.ws.name),
+      placeholder: 'document',
+      oninput: (value) => {
+        ctx.ws.name = value.trim() || 'document';
+        ctx.app.onPagesChanged();
+      },
+    });
+    // The title bar edits the same name, so it has to be followed back.
+    ctx.onClose(ctx.ws.on('pages', () => {
+      if (document.activeElement !== outputName) outputName.value = baseName(ctx.ws.name);
+    }));
+
     const renderList = () => {
       clear(list);
       const counts = new Map();
@@ -103,6 +116,9 @@ const merge = {
         hint('Drag any page in the grid to move it. Right-click → “Move to position…” to type a page number instead. Select several pages first to move them as a block.'),
       ),
       section('Output',
+        // The same name the title bar carries, offered where the saving happens
+        // so it does not have to be hunted for at the top of the window.
+        field('File name', outputName, 'Saved as this, with .pdf added.'),
         buttonRow(primary('Merge & save', { onclick: () => ctx.app.exportCurrent() })),
       ),
     );
@@ -149,6 +165,18 @@ const split = {
       renderPreview();
     };
 
+    /*
+     * Names the user typed, kept by part number.
+     *
+     * The list is rebuilt whenever a cut moves, so anything typed into it has to
+     * live outside the DOM or it would be lost on the next keystroke elsewhere.
+     * A part that stops existing keeps its name in here, which is what you want
+     * when a cut is dragged one page and back.
+     */
+    const chosenNames = new Map();
+    const defaultName = (index) => `${baseName(ctx.ws.name)} cut ${index + 1}.pdf`;
+    const nameFor = (index) => chosenNames.get(index) || defaultName(index);
+
     const renderPreview = () => {
       clear(preview);
       const ranges = ctx.ws.splitRanges();
@@ -156,10 +184,20 @@ const split = {
         preview.appendChild(hint('Add at least one cut point to split the document.'));
         return;
       }
-      const base = baseName(ctx.ws.name);
       ranges.forEach(([from, to], index) => {
+        const name = h('input.partrow__name', {
+          value: nameFor(index),
+          spellcheck: 'false',
+          'aria-label': `Name of part ${index + 1}`,
+          title: 'Click to rename this part',
+          oninput: () => {
+            const typed = name.value.trim();
+            if (typed && typed !== defaultName(index)) chosenNames.set(index, typed);
+            else chosenNames.delete(index);
+          },
+        });
         preview.appendChild(h('div.partrow',
-          h('span.partrow__name', `${base} cut ${index + 1}.pdf`),
+          name,
           h('span.partrow__meta', from === to ? `page ${from}` : `pages ${from}–${to}`),
         ));
       });
@@ -192,7 +230,9 @@ const split = {
           progress.update(index / result.ranges.length, `Part ${index + 1} of ${result.ranges.length}`);
           const pages = ctx.ws.pages.slice(from - 1, to);
           const bytes = await buildPdf(ctx.ws, pages, ctx.app.exportOptions());
-          entries.push({ name: `${base} cut ${index + 1}.pdf`, data: bytes });
+          // Whatever the list shows is what gets saved, typed or not.
+          const chosen = nameFor(index);
+          entries.push({ name: /\.pdf$/i.test(chosen) ? chosen : `${chosen}.pdf`, data: bytes });
         }
         const outcome = await saveMany(entries, {
           zipName: `${base} split.zip`,
@@ -359,6 +399,15 @@ const rotate = {
       });
     };
 
+    const flip = (axis) => {
+      const pages = scope.resolve();
+      if (!pages) return;
+      const key = axis === 'x' ? 'flipX' : 'flipY';
+      ctx.commit(axis === 'x' ? 'Mirror across' : 'Mirror down', () => {
+        for (const page of pages) page[key] = !page[key];
+      });
+    };
+
     return h('div',
       section('Pages', scope.el),
       section('Quarter turns',
@@ -367,6 +416,13 @@ const rotate = {
           button('↻ 90° right', { onclick: () => quarter(90) }),
           button('180°', { onclick: () => quarter(180) }),
         ),
+      ),
+      section('Mirror',
+        buttonRow(
+          button('⇄ Left to right', { onclick: () => flip('x') }),
+          button('⇅ Top to bottom', { onclick: () => flip('y') }),
+        ),
+        hint('Pressing the same one again turns it back. A mirrored page is redrawn as an image, so its text stops being selectable — a quarter turn does not do that.'),
       ),
       section('Any angle',
         field('Angle', angle),
