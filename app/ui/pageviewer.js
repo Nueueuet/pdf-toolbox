@@ -19,8 +19,16 @@ import { pageSize } from '../core/workspace.js';
 import { appendOcrText } from './ocrlayer.js';
 import { TextLayer } from '../../vendor/pdf.mjs';
 
-/** Zoom steps the buttons and keyboard walk through. */
-const ZOOM_STEPS = [0.25, 0.375, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4, 6, 8];
+/**
+ * Zoom steps the buttons and keyboard walk through.
+ *
+ * Half-steps as far as 400%, because the jump from 200 straight to 300 skips
+ * the range where you are actually reading something closely; past that the
+ * doubling is fine, since nobody adjusts 600% by fifty.
+ */
+const ZOOM_STEPS = [
+  0.25, 0.375, 0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3, 3.5, 4, 6, 8,
+];
 const MIN_ZOOM = ZOOM_STEPS[0];
 const MAX_ZOOM = ZOOM_STEPS[ZOOM_STEPS.length - 1];
 /** Gap between pages in continuous layout, in CSS pixels. */
@@ -148,10 +156,47 @@ export class PageViewer {
 
   zoomBy(direction) {
     const current = this.effectiveZoom();
+    const stops = this.zoomStops();
     const steps = direction > 0
-      ? ZOOM_STEPS.filter((z) => z > current + 0.001)
-      : ZOOM_STEPS.filter((z) => z < current - 0.001).reverse();
+      ? stops.filter((z) => z > current + 0.001)
+      : stops.filter((z) => z < current - 0.001).reverse();
     this.setZoom(steps.length ? steps[0] : current);
+  }
+
+  /**
+   * The round steps, plus the two sizes at which the page exactly fills the
+   * window — once across and once down.
+   *
+   * Those two are worth stopping at because they are the sizes anyone actually
+   * wants: the whole width in view, or the whole page. They are also the ones
+   * nobody could dial in by hand, being a different awkward number for every
+   * document and every window — 223% on one, 91% on the next.
+   */
+  zoomStops() {
+    const fit = this.fitScales();
+    const stops = [...ZOOM_STEPS];
+    for (const value of [fit.width, fit.height]) {
+      if (value >= MIN_ZOOM && value <= MAX_ZOOM
+        && !stops.some((z) => Math.abs(z - value) < 0.005)) {
+        stops.push(value);
+      }
+    }
+    return stops.sort((a, b) => a - b);
+  }
+
+  /** Scales at which the page fills the window across, and down. */
+  fitScales() {
+    const page = this.currentPage() ?? this.ws.pages[0];
+    if (!page) return { width: 1, height: 1 };
+    const { w, h: ph } = pageSize(page);
+    // clientWidth, not the outer box: the gutter kept for the scrollbar is not
+    // room the page can use, and on a very wide sheet that difference is what
+    // stops "fit" from actually fitting.
+    const padding = 48;
+    return {
+      width: (this.scroller.clientWidth - padding) / w || 1,
+      height: (this.scroller.clientHeight - padding) / ph || 1,
+    };
   }
 
   /** The scale actually in use, resolving "fit" against the current window. */
@@ -162,20 +207,8 @@ export class PageViewer {
 
   /** Scale at which the current page fits entirely inside the window. */
   fitScale() {
-    const page = this.currentPage() ?? this.ws.pages[0];
-    if (!page) return 1;
-    const { w, h: ph } = pageSize(page);
-    // clientWidth, not the outer box: the gutter kept for the scrollbar is not
-    // room the page can use, and on a very wide sheet that difference is what
-    // stops "fit" from actually fitting.
-    const padding = 48;
-    return Math.max(
-      MIN_ZOOM,
-      Math.min(
-        (this.scroller.clientWidth - padding) / w,
-        (this.scroller.clientHeight - padding) / ph,
-      ) || 1,
-    );
+    const { width, height } = this.fitScales();
+    return Math.max(MIN_ZOOM, Math.min(width, height) || 1);
   }
 
   currentPage() {
@@ -494,6 +527,24 @@ export class PageViewer {
       }
 
       /*
+       * A tilt wheel, which reports sideways movement on its own.
+       *
+       * The browser scrolls a scroller with room to spare by itself, so this
+       * only has to answer for the case where there is none: at that point the
+       * gesture was simply being swallowed. Turning the page is what tilting
+       * means when there is nowhere left to go sideways.
+       */
+      if (Math.abs(event.deltaX) > Math.abs(event.deltaY)) {
+        if (canScrollSideways) return; // the browser handles it
+        if (this.layout !== 'single') return;
+        event.preventDefault();
+        const now = performance.now();
+        if (now - (this.lastPageTurn ?? 0) < 220) return;
+        if (this.step(event.deltaX > 0 ? 1 : -1)) this.lastPageTurn = now;
+        return;
+      }
+
+      /*
        * The whole sheet is visible and there is nothing to scroll, so the wheel
        * would otherwise do nothing at all. Turning the page is what the gesture
        * means at that point.
@@ -556,20 +607,21 @@ export class PageViewer {
     });
   }
 
-  /** @returns {boolean} whether the key was used */
+  /**
+   * @returns {boolean} whether the key was used
+   *
+   * Left and right turn the page, up and down move within it. They used to
+   * share the job — sideways turned the page only while the whole sheet was
+   * visible, and scrolled it downwards otherwise — which meant that zooming in
+   * silently changed what the arrow keys did.
+   */
   handleKey(event) {
     const step = 120;
     switch (event.key) {
-      case 'ArrowRight':
-      case 'PageDown':
-        if (this.layout === 'single' && !this.canScroll()) return this.step(1);
-        this.scroller.scrollTop += this.scroller.clientHeight * 0.9;
-        return true;
-      case 'ArrowLeft':
-      case 'PageUp':
-        if (this.layout === 'single' && !this.canScroll()) return this.step(-1);
-        this.scroller.scrollTop -= this.scroller.clientHeight * 0.9;
-        return true;
+      case 'ArrowRight': return this.layout === 'single' ? this.step(1) : this.pageDown(1);
+      case 'ArrowLeft': return this.layout === 'single' ? this.step(-1) : this.pageDown(-1);
+      case 'PageDown': return this.pageDown(1);
+      case 'PageUp': return this.pageDown(-1);
       case 'ArrowDown': this.scroller.scrollTop += step; return true;
       case 'ArrowUp': this.scroller.scrollTop -= step; return true;
       case 'Home': this.scroller.scrollTop = 0; return true;
@@ -579,5 +631,22 @@ export class PageViewer {
       case '0': this.setZoom(null); return true;
       default: return false;
     }
+  }
+
+  /**
+   * A windowful at a time, carrying on to the next page at the end of this one.
+   * What Page Down means in every other reader.
+   */
+  pageDown(direction) {
+    const s = this.scroller;
+    const atEnd = direction > 0
+      ? s.scrollTop + s.clientHeight >= s.scrollHeight - 2
+      : s.scrollTop <= 2;
+    if (atEnd) {
+      if (this.layout !== 'single') return false;
+      return this.step(direction);
+    }
+    s.scrollTop += direction * s.clientHeight * 0.9;
+    return true;
   }
 }

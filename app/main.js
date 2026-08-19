@@ -463,6 +463,7 @@ class App {
 
     this.el.docTitle.addEventListener('change', () => {
       this.ws.name = this.el.docTitle.value.trim() || 'document';
+      this.onPagesChanged();
     });
   }
 
@@ -694,6 +695,9 @@ class App {
     if (hasPages && !this.activeToolId) this.selectTool(DEFAULT_TOOL);
 
     this.el.docTitle.value = this.ws.name;
+    // The tab is how you find this window again among twenty others, so it says
+    // which document is in it rather than repeating the name of the app.
+    document.title = hasPages ? `${this.ws.name} — PDF Toolbox` : 'PDF Toolbox';
     const sourceCount = new Set(this.ws.pages.map((p) => p.srcId)).size;
     this.el.docMeta.textContent = `${this.ws.pageCount} ${this.ws.pageCount === 1 ? 'page' : 'pages'} · ${sourceCount} ${sourceCount === 1 ? 'file' : 'files'}`;
 

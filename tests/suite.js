@@ -905,6 +905,82 @@ test('a long document only draws the pages in view', async () => {
   }
 });
 
+test('zoom stops where the page fills the window, and steps by fifty to 400%', async () => {
+  const ws = await loadWorkspace(['report.pdf']);
+  const host = document.createElement('div');
+  host.className = 'viewer';
+  host.style.cssText = 'position:fixed;left:0;top:0;width:800px;height:600px;opacity:0;z-index:9999';
+  document.body.appendChild(host);
+
+  const viewer = new PageViewer(host, ws, {});
+  try {
+    await viewer.open(ws.pages[0]);
+    const stops = viewer.zoomStops();
+    const fit = viewer.fitScales();
+
+    // The two sizes nobody could dial in by hand: a different awkward number for
+    // every page and every window, and the only two worth landing on exactly.
+    for (const [name, value] of [['width', fit.width], ['height', fit.height]]) {
+      assert(stops.some((z) => Math.abs(z - value) < 0.005),
+        `the size that fills the window ${name}wise (${(value * 100).toFixed(1)}%) is not a stop`);
+    }
+
+    // Half-steps through the range where a document is actually being read.
+    for (const step of [2, 2.5, 3, 3.5, 4]) {
+      assert(stops.some((z) => Math.abs(z - step) < 0.001), `${step * 100}% is missing`);
+    }
+
+    // Walking up must never skip one of them.
+    viewer.setZoom(2);
+    viewer.zoomBy(1);
+    assert(Math.abs(viewer.zoom - 2.5) < 0.001,
+      `above 200% it went to ${(viewer.zoom * 100).toFixed(0)}%, not 250%`);
+  } finally {
+    viewer.destroy();
+    host.remove();
+  }
+});
+
+test('left and right turn the page whether or not it is zoomed in', async () => {
+  /*
+   * They used to share the job with scrolling — sideways turned the page only
+   * while the whole sheet was visible, and scrolled downwards otherwise — so
+   * zooming in silently changed what the arrow keys did.
+   */
+  const ws = await loadWorkspace(['report.pdf']);
+  const host = document.createElement('div');
+  host.className = 'viewer';
+  host.style.cssText = 'position:fixed;left:0;top:0;width:800px;height:600px;opacity:0;z-index:9999';
+  document.body.appendChild(host);
+
+  const viewer = new PageViewer(host, ws, {});
+  try {
+    await viewer.open(ws.pages[0]);
+    viewer.setZoom(3);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert(viewer.canScroll(), 'the test needs a page bigger than its window');
+
+    const first = viewer.currentPageId;
+    viewer.handleKey({ key: 'ArrowRight' });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert(viewer.currentPageId !== first, 'the right arrow did not turn the page while zoomed in');
+
+    viewer.handleKey({ key: 'ArrowLeft' });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert(viewer.currentPageId === first, 'the left arrow did not come back');
+
+    // Up and down stay with the page they are on.
+    const page = viewer.currentPageId;
+    const top = viewer.scroller.scrollTop;
+    viewer.handleKey({ key: 'ArrowDown' });
+    assert(viewer.currentPageId === page, 'the down arrow turned the page');
+    assert(viewer.scroller.scrollTop > top, 'the down arrow did not scroll');
+  } finally {
+    viewer.destroy();
+    host.remove();
+  }
+});
+
 test('a wide sheet can be panned past all four of its edges', async () => {
   const ws = await loadWorkspace(['blueprint.pdf']);
   const host = document.createElement('div');
