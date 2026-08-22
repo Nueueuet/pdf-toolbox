@@ -35,6 +35,18 @@ const test = (name, fn) => tests.push({ name, fn });
 
 // ------------------------------------------------------------------ helpers
 
+/**
+ * The page actually on show.
+ *
+ * Reading one page at a time, the viewer also holds the two pages either side,
+ * built and drawn but hidden, so that turning to one is instant. They are real
+ * elements, and the first `.viewer__page` in the document is one of them — so
+ * anything measuring "the page" has to say which page it means.
+ */
+function onStage(host) {
+  return host.querySelector('.viewer__page:not(.is-offstage)');
+}
+
 async function loadWorkspace(names) {
   const ws = new Workspace();
   const files = [];
@@ -790,7 +802,7 @@ test('recognised text can be selected in the app, not only in the saved file', a
     assert(copied.trim().length > 0, 'selecting a recognised word produced nothing');
 
     // And each word has to sit on the page rather than beside it.
-    const stage = host.querySelector('.viewer__page').getBoundingClientRect();
+    const stage = onStage(host).getBoundingClientRect();
     const box = spans[0].getBoundingClientRect();
     assert(box.left >= stage.left - 2 && box.right <= stage.right + 2,
       'a recognised word is positioned outside the page');
@@ -895,7 +907,22 @@ test('continuous layout stacks every page', async () => {
   const viewer = new PageViewer(host, ws, {});
   try {
     await viewer.open(ws.pages[0]);
-    assert(host.querySelectorAll('.viewer__page').length === 1, 'single layout should show one page');
+    /*
+     * One page on show, and the pages either side standing by out of sight.
+     * Those are drawn in advance so that turning to one is instant; what makes
+     * them invisible has to also make them take up no room, or a document read
+     * one page at a time would scroll as if it were five pages long.
+     */
+    assert(host.querySelectorAll('.viewer__page:not(.is-offstage)').length === 1,
+      'single layout should show one page');
+    const waiting = host.querySelectorAll('.viewer__page.is-offstage');
+    assert(waiting.length > 0, 'no pages were prepared for the next turn');
+    for (const frame of waiting) {
+      assert(getComputedStyle(frame).visibility === 'hidden', 'a page waiting its turn is visible');
+    }
+    const scroll = host.querySelector('.viewer__scroll');
+    assert(scroll.scrollHeight <= scroll.clientHeight + 2,
+      `the pages waiting their turn added ${scroll.scrollHeight - scroll.clientHeight}px of scrolling`);
 
     viewer.setLayout('continuous');
     await new Promise((resolve) => setTimeout(resolve, 300));
@@ -904,6 +931,46 @@ test('continuous layout stacks every page', async () => {
     assert(frames.length === ws.pageCount, `expected ${ws.pageCount} pages, got ${frames.length}`);
     // Stacked, so scrolling runs from one page into the next.
     assert(frames[1].offsetTop > frames[0].offsetTop, 'pages are not stacked vertically');
+  } finally {
+    viewer.destroy();
+    host.remove();
+  }
+});
+
+test('turning the page lands on a page already drawn', async () => {
+  /*
+   * What used to happen on every turn: throw the frame away, build a new one,
+   * ask pdf.js for the page, wait for it to rasterise. On a long document that
+   * is a wait on every single turn, for a page the reader is about to want
+   * whether or not they have asked for it yet.
+   */
+  const ws = await loadWorkspace(['long.pdf']);
+  const host = document.createElement('div');
+  host.className = 'viewer';
+  host.style.cssText = 'position:fixed;left:0;top:0;width:800px;height:600px;opacity:0;z-index:9999';
+  document.body.appendChild(host);
+
+  const viewer = new PageViewer(host, ws, {});
+  try {
+    await viewer.open(ws.pages[40]);
+    // Long enough for the neighbours to have been drawn in the background.
+    await new Promise((resolve) => setTimeout(resolve, 900));
+
+    const ready = (id) => Boolean(viewer.frames.get(id)?.dataset.drawnScale);
+    assert(ready(ws.pages[41].id), 'the next page was not drawn in advance');
+    assert(ready(ws.pages[39].id), 'the previous page was not drawn in advance');
+
+    viewer.step(1);
+    assert(viewer.currentPageId === ws.pages[41].id, 'the turn did not land on the next page');
+    // The moment of the turn, before anything asynchronous can have run.
+    assert(ready(viewer.currentPageId), 'the page turned to had to be drawn from scratch');
+    const shown = viewer.frames.get(viewer.currentPageId);
+    assert(!shown.classList.contains('is-offstage'), 'the page turned to is still hidden');
+
+    // And the neighbourhood follows along rather than growing without end.
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    assert(viewer.frames.size <= 5, `${viewer.frames.size} frames are being held for one page`);
+    assert(ready(ws.pages[42].id), 'the page beyond the new one was not prepared');
   } finally {
     viewer.destroy();
     host.remove();
@@ -1424,7 +1491,7 @@ test('a wide sheet can be panned past all four of its edges', async () => {
   try {
     await viewer.open(ws.pages[0]);
     const scroller = host.querySelector('.viewer__scroll');
-    const frame = host.querySelector('.viewer__page');
+    const frame = onStage(host);
 
     // Nothing to pan while it all fits, so no empty room is invented either.
     viewer.setZoom(null);

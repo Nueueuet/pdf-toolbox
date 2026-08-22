@@ -55,11 +55,39 @@ function pageScope(ctx, { label = 'Pages' } = {}) {
 
 // ------------------------------------------------------------------- merge
 
+/**
+ * Welche der Namen mehr als einmal vorkommen.
+ *
+ * Verglichen wird ohne Rücksicht auf Groß- und Kleinschreibung und ohne
+ * umgebende Leerzeichen: Windows hält „Bild 1.pdf" und „bild 1.pdf" für
+ * dieselbe Datei, also würde die zweite die erste stillschweigend ersetzen.
+ *
+ * @param {string[]} names
+ * @returns {Set<number>} die Indizes der doppelten Einträge
+ */
+function duplicateNames(names) {
+  const seen = new Map();
+  const clash = new Set();
+  names.forEach((name, index) => {
+    const key = String(name ?? '').trim().toLowerCase();
+    if (!key) return;
+    if (seen.has(key)) {
+      clash.add(seen.get(key));
+      clash.add(index);
+    } else {
+      seen.set(key, index);
+    }
+  });
+  return clash;
+}
+
 const merge = {
   id: 'merge',
   label: 'Merge',
   group: 'Organise',
-  mode: 'grid',
+  // Stays where you are: the file list and the output name are panel work, and
+  // being thrown back to the grid to type a name is how you lose your place.
+  mode: 'any',
   icon: 'M8 3H5a2 2 0 0 0-2 2v3 M16 3h3a2 2 0 0 1 2 2v3 M3 16v3a2 2 0 0 0 2 2h3 M21 16v3a2 2 0 0 1-2 2h-3 M12 8v8 M8 12h8',
   blurb: 'Combine files into one PDF. Drag pages to reorder, or right-click a page to type an exact position.',
   panel(ctx) {
@@ -89,8 +117,35 @@ const merge = {
       }
       for (const [srcId, count] of counts) {
         const source = ctx.ws.sources.get(srcId);
-        list.appendChild(h('div.filerow',
-          h('span.filerow__name', { title: source?.name }, source?.name ?? 'Unknown'),
+        /*
+         * The file's name is typed here rather than read.
+         *
+         * Renaming is not a change to the document, so it is not committed:
+         * undo works on the list of pages, and a step that puts a name back
+         * would be an undo that appears to do nothing.
+         */
+        const rename = h('input.partrow__name', {
+          type: 'text',
+          value: baseName(source?.name ?? 'Unknown'),
+          spellcheck: 'false',
+          'aria-label': `Name of ${source?.name ?? 'this file'}`,
+          title: 'Click to rename this file',
+          oninput: () => {
+            const typed = rename.value.trim();
+            if (!source || !typed) return;
+            source.name = `${typed}.pdf`;
+            // One file in the workspace is the document: what comes out of
+            // saving *is* that file, so the two names are the same name.
+            if (counts.size === 1 && ctx.ws.name !== typed) {
+              ctx.ws.name = typed;
+              ctx.app.syncDocName();
+            }
+          },
+        });
+
+        const row = h('div.filerow',
+          rename,
+          h('span.partrow__ext', '.pdf'),
           h('span.filerow__meta', `${count} ${count === 1 ? 'page' : 'pages'}`),
           h('button.linkbtn', {
             type: 'button',
@@ -100,7 +155,20 @@ const merge = {
               ctx.ws.pages = ctx.ws.pages.filter((p) => p.srcId !== srcId);
             }),
           }, 'Remove'),
-        ));
+        );
+
+        // The whole row is the name field, not just the text in it: a row is a
+        // thin strip and the text rarely fills it, so clicking the space beside
+        // a name has to land in the same place clicking the name does. Remove
+        // is a button and stays one.
+        row.addEventListener('pointerdown', (event) => {
+          if (event.target.closest('button') || event.target === rename) return;
+          event.preventDefault();
+          rename.focus();
+          rename.setSelectionRange(rename.value.length, rename.value.length);
+        });
+
+        list.appendChild(row);
       }
     };
     renderList();
@@ -132,7 +200,9 @@ const split = {
   id: 'split',
   label: 'Split',
   group: 'Organise',
-  mode: 'grid',
+  // Cuts can be placed in the join between two pages in the viewer as well as
+  // in the grid, so the tool no longer insists on the grid.
+  mode: 'any',
   icon: 'M8 3v6a2 2 0 0 1-2 2H3 M16 3v6a2 2 0 0 0 2 2h3 M8 21v-6a2 2 0 0 0-2-2H3 M16 21v-6a2 2 0 0 1 2-2h3 M12 2v20',
   blurb: 'Cut the document into several files. Add as many cut points as you like — they are all applied at once.',
   panel(ctx) {
@@ -207,6 +277,32 @@ const split = {
       return chosenNames.get(index) || defaultName(index);
     };
 
+    /**
+     * Which parts are not to be saved, by part number.
+     *
+     * Outside the DOM like the names, because the list is rebuilt whenever a cut
+     * moves. What is stored is the parts left *out*, so that a freshly built
+     * list — with nothing in here at all — means "save everything", which is
+     * what anyone opening the tool expects.
+     */
+    const skipped = new Set();
+
+    const warning = h('p.partlist__warning', 'Two parts have the same name — the second would overwrite the first.');
+
+    /**
+     * Marks the names that appear twice.
+     *
+     * Kept apart from building the list, and deliberately so: this runs on every
+     * keystroke, and rebuilding the rows would take away the very box being
+     * typed into. Only classes and one line of text change here.
+     */
+    const markClashes = () => {
+      const fields = [...preview.querySelectorAll('input.partrow__name')];
+      const clash = duplicateNames(fields.map((el) => el.value));
+      fields.forEach((el, index) => el.classList.toggle('is-clashing', clash.has(index)));
+      warning.hidden = clash.size === 0;
+    };
+
     const renderPreview = () => {
       clear(preview);
       const ranges = ctx.ws.splitRanges();
@@ -215,8 +311,21 @@ const split = {
         return;
       }
       ranges.forEach(([from, to], index) => {
+        const keep = h('input.partrow__keep', {
+          type: 'checkbox',
+          checked: !skipped.has(index),
+          title: 'Save this part',
+          'aria-label': `Save part ${index + 1}`,
+          onchange: () => {
+            if (keep.checked) skipped.delete(index);
+            else skipped.add(index);
+            row.classList.toggle('is-skipped', !keep.checked);
+          },
+        });
         const name = h('input.partrow__name', {
-          value: nameFor(index),
+          // Without the extension: it is shown beside the box instead, where it
+          // cannot be deleted. A PDF is a PDF.
+          value: baseName(nameFor(index)),
           spellcheck: 'false',
           // While a pattern is naming them, these show what will come out rather
           // than offering an edit that the next keystroke elsewhere would undo.
@@ -225,15 +334,24 @@ const split = {
           title: numbering.checked ? 'Named by the pattern above' : 'Click to rename this part',
           oninput: () => {
             const typed = name.value.trim();
-            if (typed && typed !== defaultName(index)) chosenNames.set(index, typed);
+            // Compared without the extension, because that is what the box now
+            // holds — against the name with one, every part counted as renamed
+            // the moment it was touched.
+            if (typed && typed !== baseName(defaultName(index))) chosenNames.set(index, typed);
             else chosenNames.delete(index);
+            markClashes();
           },
         });
-        preview.appendChild(h('div.partrow',
+        const row = h(`div.partrow${skipped.has(index) ? '.is-skipped' : ''}`,
+          keep,
           name,
+          h('span.partrow__ext', '.pdf'),
           h('span.partrow__meta', from === to ? `page ${from}` : `pages ${from}–${to}`),
-        ));
+        );
+        preview.appendChild(row);
       });
+      preview.appendChild(warning);
+      markClashes();
     };
 
     const numberingFields = h('div.numbering',
@@ -291,14 +409,27 @@ const split = {
       if (ranges.length < 2) {
         return toast('Add at least one cut point first', { tone: 'error' });
       }
+      /*
+       * The parts left out are skipped, not renumbered.
+       *
+       * A part's name comes from its position in the whole list — part three is
+       * "bild 3" whether or not parts one and two are being saved. Filtering the
+       * list first and counting again would quietly rename everything.
+       */
+      const wanted = ranges.filter((_, index) => !skipped.has(index));
+      if (wanted.length === 0) {
+        return toast('No parts ticked — nothing to save', { tone: 'error' });
+      }
       const result = { ranges };
 
       const base = baseName(ctx.ws.name);
       const progress = progressToast('Splitting…');
       try {
         const entries = [];
+        let done = 0;
         for (const [index, [from, to]] of result.ranges.entries()) {
-          progress.update(index / result.ranges.length, `Part ${index + 1} of ${result.ranges.length}`);
+          if (skipped.has(index)) continue;
+          progress.update(done++ / wanted.length, `Part ${entries.length + 1} of ${wanted.length}`);
           const pages = ctx.ws.pages.slice(from - 1, to);
           const bytes = await buildPdf(ctx.ws, pages, ctx.app.exportOptions());
           // Whatever the list shows is what gets saved, typed or not.
@@ -316,6 +447,23 @@ const split = {
       }
     };
 
+    /*
+     * A cut at the page you are on, for when there is no gap to click.
+     *
+     * In the grid and in the continuous viewer a cut is placed in the join
+     * between two pages. Reading one page at a time there is no join on screen —
+     * the pages either side are not there — so the same act needs a button.
+     */
+    const cutHere = () => {
+      const page = ctx.currentPage();
+      const after = page ? ctx.ws.indexOf(page.id) + 1 : 0;
+      if (after < 1 || after >= ctx.ws.pageCount) {
+        return toast('The last page has nothing after it to cut', { tone: 'error' });
+      }
+      ctx.ws.toggleCut(after);
+      toast(ctx.ws.cutList().includes(after) ? `Splitting after page ${after}` : `Split after page ${after} removed`);
+    };
+
     return h('div',
       section('Cut points',
         cutsField,
@@ -323,8 +471,11 @@ const split = {
           hint('Or cut every'), everyN, hint('pages'),
           button('Apply', { onclick: applyEveryN }),
         ),
-        buttonRow(button('Clear all cuts', { onclick: () => ctx.ws.setCuts([]) })),
-        hint('Click between two pages to cut there. Click the scissors again to remove that cut, or drag them to another gap to move it. While this tool is open, every possible cut position is marked.'),
+        buttonRow(
+          button('Cut after this page', { onclick: cutHere }),
+          button('Clear all cuts', { onclick: () => ctx.ws.setCuts([]) }),
+        ),
+        hint('Click the gap between two pages to cut there, in the viewer or in the overview; click the scissors again to remove that cut. While this tool is open, every possible cut position is marked.'),
       ),
       section('Result',
         numbering,

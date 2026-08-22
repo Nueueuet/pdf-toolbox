@@ -39,6 +39,37 @@ const PAGE_GAP = 18;
 /** How far beyond the window a page is drawn, so scrolling meets a ready page. */
 const PAINT_MARGIN = 400;
 
+/** How many pages either side are drawn in advance when reading one at a time. */
+const PREFETCH_REACH = 2;
+
+/**
+ * A wheel's delta in pixels, whatever unit it arrived in.
+ *
+ * `deltaX` and `deltaY` are only pixels when `deltaMode` says so. A trackpad
+ * reports pixels; a mouse wheel — and the thumb wheel on a Logitech MX Master —
+ * often reports *lines*, one or three per detent. Adding that number straight to
+ * `scrollLeft` moves the page by one pixel per push of the thumb wheel, which
+ * reads as the sideways wheel doing nothing at all.
+ *
+ * @param {number} value the raw delta
+ * @param {number} mode 0 pixels, 1 lines, 2 pages
+ * @param {number} extent the window's size along that axis, for whole pages
+ */
+function wheelPixels(value, mode, extent) {
+  if (mode === 1) return value * 16;
+  if (mode === 2) return value * extent;
+  return value;
+}
+
+/** The same scissors the grid puts in its gutters, for the same job. */
+const SCISSORS = [
+  'M6 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z',
+  'M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z',
+  'M20 4 8.12 15.88',
+  'M14.47 14.48 20 20',
+  'M8.12 8.12 12 12',
+];
+
 /**
  * Places a mark over a run of the page's text — an inspection box or one of the
  * runs offered for picking.
@@ -119,6 +150,10 @@ export class PageViewer {
 
     this.onResize = () => this.relayout();
     window.addEventListener('resize', this.onResize);
+
+    // The cuts belong to the document, not to either surface: the grid draws
+    // them, this draws them, and both are looking at the same list.
+    this.offCuts = ws.on('cuts', () => this.syncCutMarks());
   }
 
   navButton(side, path, delta) {
@@ -145,6 +180,60 @@ export class PageViewer {
   destroy() {
     window.removeEventListener('resize', this.onResize);
     this.visibility?.disconnect();
+    this.offCuts?.();
+  }
+
+  // -------------------------------------------------------------- split cuts
+
+  /**
+   * Shows where a cut could go while the Split tool is open.
+   *
+   * Splitting used to send you to the grid, which meant naming the parts from a
+   * wall of thumbnails — you could see twenty pages and read none of them. The
+   * gap between two pages is where a cut goes here just as it is there, so the
+   * gap becomes the target and the page you are reading stays in front of you.
+   */
+  setSplitHint(on) {
+    this.splitHint = Boolean(on);
+    this.root.classList.toggle('is-splithint', this.splitHint);
+    this.syncCutMarks();
+  }
+
+  /**
+   * One mark per join. In single-page layout there are no joins on screen — the
+   * pages either side are not there to be between — so the panel offers a button
+   * for the page you are on instead.
+   */
+  syncCutMarks() {
+    for (const mark of this.pages.querySelectorAll('.viewercut')) mark.remove();
+    if (!this.splitHint || this.layout !== 'continuous') return;
+
+    const active = new Set(this.ws.cutList());
+    for (const [id, frame] of this.frames) {
+      const afterPage = this.ws.indexOf(id) + 1;
+      if (afterPage < 1 || afterPage >= this.ws.pageCount) continue;
+      frame.appendChild(this.cutMark(afterPage, active.has(afterPage)));
+    }
+  }
+
+  cutMark(afterPage, isActive) {
+    const mark = h(`div.viewercut${isActive ? '.is-active' : ''}`, {
+      dataset: { after: String(afterPage) },
+      title: isActive
+        ? `Splitting after page ${afterPage} — click to remove this split`
+        : `Click to split after page ${afterPage}`,
+    }, h('span.viewercut__line'), h('span.viewercut__grip', icon(SCISSORS, { size: 13, stroke: 1.9 })));
+
+    mark.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0) return;
+      // The page underneath answers to pointerdown as well, and would take the
+      // click as "work on this page and drop the selection".
+      event.preventDefault();
+      event.stopPropagation();
+      this.ws.toggleCut(afterPage);
+    });
+
+    return mark;
   }
 
   // ------------------------------------------------------------------ state
@@ -336,23 +425,60 @@ export class PageViewer {
     if (this.ws.pageCount === 0) return;
 
     this.root.dataset.layout = this.layout;
-    const list = this.layout === 'single'
-      ? [this.currentPage()].filter(Boolean)
-      : this.ws.pages;
+    const list = this.layout === 'single' ? this.neighbourhood() : this.ws.pages;
 
     for (const page of list) {
       const frame = this.frame(page);
+      // In single layout the neighbours are built and drawn but not shown, so
+      // that turning the page finds a page already there.
+      if (this.layout === 'single' && page.id !== this.currentPageId) {
+        frame.classList.add('is-offstage');
+      }
       this.frames.set(page.id, frame);
       this.pages.appendChild(frame);
       this.visibility.observe(frame);
     }
 
     this.relayout();
+    this.prefetch();
     this.applyEditMode();
     for (const [id, frame] of this.frames) this.drawInspection(frame, this.ws.pageById(id));
+    this.syncCutMarks();
     this.syncNav();
     if (this.layout === 'continuous' && !keepScroll) this.scrollToPage(this.currentPageId, 'auto');
     if (token === this.renderToken) this.handlers.onZoomChange?.(this.effectiveZoom(), this.zoom === null);
+  }
+
+  /**
+   * The page being read and the two either side of it.
+   *
+   * Reading one page at a time, each turn used to start from nothing: build a
+   * frame, ask pdf.js for the page, wait for it to rasterise. Two pages in each
+   * direction is enough that a turn — in either direction, and twice in a row —
+   * lands on a page that is already drawn, while never holding more than five
+   * bitmaps for a document of any length.
+   */
+  neighbourhood(reach = PREFETCH_REACH) {
+    const index = this.ws.indexOf(this.currentPageId);
+    if (index < 0) return [this.currentPage()].filter(Boolean);
+    const from = Math.max(0, index - reach);
+    const to = Math.min(this.ws.pageCount, index + reach + 1);
+    return this.ws.pages.slice(from, to);
+  }
+
+  /**
+   * Draws the pages waiting in the wings.
+   *
+   * They are not on screen, so nothing else will ever ask for them: the observer
+   * that paints pages as they come into view cannot see a page that is hidden.
+   * The page being read is left to the ordinary path so that it is never held up
+   * behind its neighbours.
+   */
+  prefetch() {
+    if (this.layout !== 'single') return;
+    for (const [id, frame] of this.frames) {
+      if (id !== this.currentPageId) this.paint(frame, id);
+    }
   }
 
   frame(page) {
@@ -637,9 +763,15 @@ export class PageViewer {
       const pageHeight = Math.round(ph * scale);
       frame.style.width = `${pageWidth}px`;
       frame.style.height = `${pageHeight}px`;
-      contentWidth = Math.max(contentWidth, pageWidth);
-      // The gap sits between pages, never after the last one.
-      contentHeight += contentHeight ? pageHeight + PAGE_GAP : pageHeight;
+      // A page waiting in the wings takes up no room: it is sized so it can be
+      // drawn at the right scale, but it is not on the page and must not be
+      // counted into how far there is to scroll.
+      const offstage = frame.classList.contains('is-offstage');
+      if (!offstage) {
+        contentWidth = Math.max(contentWidth, pageWidth);
+        // The gap sits between pages, never after the last one.
+        contentHeight += contentHeight ? pageHeight + PAGE_GAP : pageHeight;
+      }
 
       // Text, inspection and editing are all laid out in page points and scaled
       // as one, so a text box and the word under it never drift apart.
@@ -655,7 +787,7 @@ export class PageViewer {
       const drawn = Number(frame.dataset.drawnScale || 0);
       if (drawn && (scale / drawn > 1.5 || drawn / scale > 2.5)) frame.dataset.needsRedraw = '1';
 
-      placed.push({ id, frame, height: pageHeight });
+      if (!offstage) placed.push({ id, frame, height: pageHeight });
     }
 
     this.applyPanRoom(contentWidth, contentHeight);
@@ -800,7 +932,11 @@ export class PageViewer {
       this.scrollToPage(id);
       this.syncNav();
     } else {
-      this.render().then(() => this.restAtEdge('top'));
+      // Jumping by number lands somewhere else entirely as often as not, so the
+      // neighbourhood is rebuilt around wherever that turns out to be.
+      this.showFromNeighbourhood();
+      this.restAtEdge('top');
+      this.syncNav();
     }
     this.handlers.onPageChange?.(page);
     return true;
@@ -849,15 +985,56 @@ export class PageViewer {
 
     this.currentPageId = next.id;
     if (this.layout === 'single') {
-      // Sized only once the render has laid the new page out, so the resting
-      // place is worked out after applyPanRoom has set the margins.
-      this.render().then(() => this.restAtEdge(delta > 0 ? 'top' : 'bottom'));
+      this.showFromNeighbourhood();
+      this.restAtEdge(delta > 0 ? 'top' : 'bottom');
     } else {
       this.scrollToPage(next.id);
     }
     this.syncNav();
     this.handlers.onPageChange?.(next);
     return true;
+  }
+
+  /**
+   * Turns to a page that is already standing by, rather than building it.
+   *
+   * A full render throws every frame away, which for the page next door means
+   * throwing away the very bitmap that was drawn in advance so this would be
+   * quick. Here the neighbours that are still neighbours are kept exactly as
+   * they are, the ones that have fallen out of reach go, and the new ones are
+   * built and drawn in the background.
+   */
+  showFromNeighbourhood() {
+    const wanted = this.neighbourhood();
+    const keep = new Set(wanted.map((page) => page.id));
+
+    for (const [id, frame] of [...this.frames]) {
+      if (keep.has(id)) continue;
+      this.visibility.unobserve(frame);
+      frame.remove();
+      this.frames.delete(id);
+      this.layers.delete(id);
+    }
+
+    for (const page of wanted) {
+      let frame = this.frames.get(page.id);
+      if (!frame) {
+        frame = this.frame(page);
+        this.frames.set(page.id, frame);
+        this.visibility.observe(frame);
+      }
+      frame.classList.toggle('is-offstage', page.id !== this.currentPageId);
+      // Re-appended in order, so the page on stage is where the layout expects
+      // it and the hidden ones sit either side of it rather than wherever they
+      // happened to be built.
+      this.pages.appendChild(frame);
+    }
+
+    this.relayout();
+    this.applyEditMode();
+    for (const [id, frame] of this.frames) this.drawInspection(frame, this.ws.pageById(id));
+    this.prefetch();
+    this.handlers.onZoomChange?.(this.effectiveZoom(), this.zoom === null);
   }
 
   // ------------------------------------------------------------------ input
@@ -877,7 +1054,7 @@ export class PageViewer {
       // ordinary scrollers already, but not once the content fits vertically.
       if (event.shiftKey && event.deltaX === 0 && canScrollSideways) {
         event.preventDefault();
-        this.scroller.scrollLeft += event.deltaY;
+        this.scroller.scrollLeft += wheelPixels(event.deltaY, event.deltaMode, this.scroller.clientHeight);
         return;
       }
 
@@ -890,7 +1067,7 @@ export class PageViewer {
       if (Math.abs(event.deltaX) > Math.abs(event.deltaY)) {
         if (!canScrollSideways) return;
         event.preventDefault();
-        this.scroller.scrollLeft += event.deltaX;
+        this.scroller.scrollLeft += wheelPixels(event.deltaX, event.deltaMode, this.scroller.clientWidth);
         return;
       }
 

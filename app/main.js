@@ -747,10 +747,7 @@ class App {
 
     if (hasPages && !this.activeToolId) this.selectTool(DEFAULT_TOOL);
 
-    this.el.docTitle.value = this.ws.name;
-    // The tab is how you find this window again among twenty others, so it says
-    // which document is in it rather than repeating the name of the app.
-    document.title = hasPages ? `${this.ws.name} — PDF Toolbox` : 'PDF Toolbox';
+    this.syncDocName();
     const sourceCount = new Set(this.ws.pages.map((p) => p.srcId)).size;
     this.el.docMeta.textContent = `${this.ws.pageCount} ${this.ws.pageCount === 1 ? 'page' : 'pages'} · ${sourceCount} ${sourceCount === 1 ? 'file' : 'files'}`;
 
@@ -765,6 +762,20 @@ class App {
     }
     this.syncSelectionStatus();
     this.syncHistoryButtons();
+  }
+
+  /**
+   * The document's name wherever it is shown.
+   *
+   * Its own method because renaming is not an edit: a panel that changes the
+   * name should not have to redraw every page and thumbnail to have the title
+   * bar and the tab follow along.
+   */
+  syncDocName() {
+    if (document.activeElement !== this.el.docTitle) this.el.docTitle.value = this.ws.name;
+    // The tab is how you find this window again among twenty others, so it says
+    // which document is in it rather than repeating the name of the app.
+    document.title = this.ws.pageCount ? `${this.ws.name} — PDF Toolbox` : 'PDF Toolbox';
   }
 
   syncHistoryButtons() {
@@ -807,6 +818,7 @@ class App {
     this.el.panelBlurb.textContent = tool.blurb;
     this.el.panel.hidden = this.ws.pageCount === 0;
     this.grid.setSplitHint(id === 'split');
+    this.viewer.setSplitHint(id === 'split');
     this.grid.setTextMode(id === 'copytext');
     this.grid.setOcrMode(id === 'ocr');
 

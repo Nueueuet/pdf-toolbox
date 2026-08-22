@@ -888,6 +888,23 @@ button { font: inherit; }
   box-shadow: var(--shadow-lg);
 }
 
+/*
+ * A page drawn in advance, waiting its turn.
+ *
+ * Hidden rather than absent: it is a real frame with a real canvas, drawn at the
+ * right scale, so turning the page is a matter of showing it. `visibility`
+ * rather than `display: none` because a page removed from the layout entirely
+ * cannot be rasterised in some browsers, and `position: absolute` so it takes up
+ * no room in the column.
+ */
+.viewer__page.is-offstage {
+  position: absolute;
+  visibility: hidden;
+  pointer-events: none;
+  top: 0;
+  left: 0;
+}
+
 .viewer__canvas, .viewer__bitmap {
   width: 100%;
   height: 100%;
@@ -900,6 +917,68 @@ button { font: inherit; }
   left: 0;
   transform-origin: 0 0;
   user-select: text;
+}
+
+/*
+ * A cut point in the join between two pages.
+ *
+ * Splitting used to mean going to the grid, where you can see twenty pages and
+ * read none of them — hopeless for naming the parts. The gap is where a cut goes
+ * in either view, so it is the target here too, and the page stays readable.
+ */
+.viewercut {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -18px;
+  height: 18px;
+  z-index: 3;
+  display: grid;
+  align-items: center;
+  /* Not centred: the page number sits in the middle of this same gap. */
+  justify-items: start;
+  padding-left: 26px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity .12s;
+}
+
+.viewer.is-splithint .viewercut { opacity: .55; }
+.viewer.is-splithint .viewercut:hover,
+.viewer.is-splithint .viewercut.is-active,
+.viewercut.is-active { opacity: 1; }
+
+.viewercut__line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 8px;
+  height: 2px;
+  border-radius: 2px;
+  background: repeating-linear-gradient(to right, var(--danger) 0 6px, transparent 6px 11px);
+}
+
+.viewercut:not(.is-active) .viewercut__line {
+  background: repeating-linear-gradient(to right, #b6c5d4 0 4px, transparent 4px 10px);
+}
+
+.viewercut__grip {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--danger);
+  border-radius: 50%;
+  background: #fff;
+  color: var(--danger);
+  box-shadow: var(--shadow-sm);
+}
+
+.viewercut:not(.is-active) .viewercut__grip {
+  border-color: #c4d1de;
+  color: var(--ink-faint);
+  box-shadow: none;
 }
 
 .viewer__number {
@@ -1499,6 +1578,14 @@ button { font: inherit; }
 
 .filerow__meta, .partrow__meta { font-size: 12px; color: var(--ink-faint); white-space: nowrap; }
 
+/* Die Endung gehört nicht dem Benutzer: eine PDF-Datei heißt .pdf. */
+.partrow__ext {
+  font-size: 13px;
+  color: var(--ink-faint);
+  margin-left: -4px;
+  white-space: nowrap;
+}
+
 /* The part name is typed into, but reads as a label until you go near it. */
 input.partrow__name {
   border: 1px solid transparent;
@@ -1514,6 +1601,27 @@ input.partrow__name:focus {
   background: var(--card);
   border-color: var(--blue);
 }
+
+input.partrow__name.is-clashing {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.partlist__warning {
+  margin: 6px 2px 0;
+  font-size: 12.5px;
+  color: var(--danger);
+}
+
+.partrow__keep { flex: none; margin: 0; cursor: pointer; }
+
+/* Left out of the save, but still shown: it can be ticked again. */
+.partrow.is-skipped { opacity: .5; }
+.partrow.is-skipped input.partrow__name { text-decoration: line-through; }
+
+/* The row is the name field — clicking the space beside a name lands in it. */
+.filerow { cursor: text; }
+.filerow .linkbtn { cursor: pointer; }
 
 .pill {
   padding: 2px 8px;
