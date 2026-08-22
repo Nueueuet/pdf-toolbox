@@ -10,7 +10,7 @@ const protect = {
   id: 'protect',
   label: 'Lock',
   group: 'Security',
-  mode: 'grid',
+  mode: 'any',
   icon: 'M5 11h14v10H5z M8 11V7a4 4 0 0 1 8 0v4',
   blurb: 'Put a password on the file, or save a copy without one.',
   panel(ctx) {

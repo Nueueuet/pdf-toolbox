@@ -43,7 +43,7 @@ const compress = {
   id: 'compress',
   label: 'Compress',
   group: 'Optimise',
-  mode: 'grid',
+  mode: 'any',
   icon: 'M4 14h6v6 M20 10h-6V4 M14 10l7-7 M3 21l7-7',
   blurb: 'Shrink the file by re-encoding pages as images. Every level shows what you would actually get.',
   panel(ctx) {
@@ -152,7 +152,7 @@ const upscale = {
   id: 'upscale',
   label: 'Upscale',
   group: 'Optimise',
-  mode: 'grid',
+  mode: 'any',
   icon: 'M3 8V5a2 2 0 0 1 2-2h3 M16 3h3a2 2 0 0 1 2 2v3 M21 16v3a2 2 0 0 1-2 2h-3 M8 21H5a2 2 0 0 1-2-2v-3 M9 12h6 M12 9v6',
   blurb: 'Increase the resolution of pages. Choose the fast renderer for documents, the AI model for scans.',
   panel(ctx) {

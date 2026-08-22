@@ -1613,6 +1613,15 @@ input.partrow__name.is-clashing {
   color: var(--danger);
 }
 
+/* A name box with its extension beside it. */
+.namerow {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.namerow > .input { flex: 1; min-width: 0; }
+
 .partrow__keep { flex: none; margin: 0; cursor: pointer; }
 
 /* Left out of the save, but still shown: it can be ticked again. */

@@ -937,6 +937,25 @@ test('continuous layout stacks every page', async () => {
   }
 });
 
+test('no tool takes away the choice of where you are', async () => {
+  /*
+   * Which surface you are on is the reader's to choose. A tool that jumps you to
+   * the overview to press a button that would have worked either way costs you
+   * your place in the document — and the pages a tool acts on are typed into its
+   * own panel anyway, so there was never anything the overview had to be there
+   * for.
+   *
+   * The three that ask for a page are the ones done with the pointer on the page
+   * itself. There is nothing to point at in a grid of thumbnails.
+   */
+  const withThePointer = new Set(['viewer', 'write', 'stamps', 'crop']);
+  for (const tool of TOOLS) {
+    const wanted = withThePointer.has(tool.id) ? 'viewer' : 'any';
+    assert(tool.mode === wanted,
+      `${tool.id} asks for "${tool.mode}" where it should ask for "${wanted}"`);
+  }
+});
+
 test('turning the page lands on a page already drawn', async () => {
   /*
    * What used to happen on every turn: throw the frame away, build a new one,

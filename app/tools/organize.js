@@ -65,6 +65,25 @@ function pageScope(ctx, { label = 'Pages' } = {}) {
  * @param {string[]} names
  * @returns {Set<number>} die Indizes der doppelten Einträge
  */
+/**
+ * Puts the unremovable `.pdf` beside a name box, the way the split list does.
+ *
+ * Told in words — "saved as this, with .pdf added" — it is something to read and
+ * believe. Shown beside the box, it is simply part of the name that happens not
+ * to be yours to change, which is what it is.
+ *
+ * The box stays inside its own label, so clicking the label still lands in it.
+ *
+ * @param {HTMLElement} labelled the field, label and all
+ * @param {HTMLInputElement} input the box inside it
+ */
+function withExtension(labelled, input) {
+  const row = h('div.namerow');
+  input.replaceWith(row);
+  row.append(input, h('span.partrow__ext', '.pdf'));
+  return labelled;
+}
+
 function duplicateNames(names) {
   const seen = new Map();
   const clash = new Set();
@@ -187,7 +206,7 @@ const merge = {
       section('Output',
         // The same name the title bar carries, offered where the saving happens
         // so it does not have to be hunted for at the top of the window.
-        field('File name', outputName, 'Saved as this, with .pdf added.'),
+        withExtension(field('File name', outputName), outputName),
         buttonRow(primary('Merge & save', { onclick: () => ctx.app.exportCurrent() })),
       ),
     );
@@ -494,7 +513,7 @@ const remove = {
   id: 'remove',
   label: 'Remove',
   group: 'Organise',
-  mode: 'grid',
+  mode: 'any',
   icon: 'M3 6h18 M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2 M19 6l-1 13a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6 M10 11v6 M14 11v6',
   blurb: 'Take pages out of the document. Removed pages are kept here so you can put them back.',
   panel(ctx) {

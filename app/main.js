@@ -826,10 +826,15 @@ class App {
      * The surface is settled before the panel is built, so a panel can read the
      * state it is about to show — the selected box, the crop rectangle.
      *
-     * A tool that works on a page does not send you anywhere any more: it uses
-     * the page you are already looking at. Only a tool that genuinely needs the
-     * whole document in front of it asks for the grid, and only when you are not
-     * already on a page.
+     * Which surface you are on is yours to choose, and no tool takes it away.
+     * Every one of them acts on the document, and the pages it acts on are named
+     * in its panel — so being marched from the page you were reading to a wall of
+     * thumbnails, to press a button that would have worked either way, was only
+     * ever a loss of your place.
+     *
+     * The exception is writing, stamping and cropping: those are done with the
+     * pointer on the page itself, and there is nothing to point at in a grid of
+     * thumbnails. They ask for the page you are already on.
      */
     if (tool.mode === 'viewer') {
       const wanted = (page ?? this.currentPage())?.id ?? null;
@@ -846,9 +851,8 @@ class App {
       this.currentPageId = wanted;
       if (!staying) this.showViewer();
       this.viewer.setEditMode(tool.editorMode ?? 'select');
-    } else if (tool.mode === 'any') {
-      if (this.mode === 'viewer') this.viewer.setEditMode('select');
-      else if (!this.onSinglePage) this.showGrid();
+    } else if (this.mode === 'viewer') {
+      this.viewer.setEditMode('select');
     } else {
       this.showGrid();
     }
@@ -971,20 +975,12 @@ class App {
   /**
    * Called when a page is opened from the grid, or stepped to with the arrows.
    *
-   * There is only one place a page can be opened now, so this no longer has to
-   * work out which surface a tool wants. A grid-only tool still hands over,
-   * because its panel has nothing to say about a single page.
+   * Whichever tool is open comes along. Every panel works on a page as happily
+   * as on a document — which pages it acts on is typed into it — so opening a
+   * page no longer means being handed to a different tool as well.
    */
   openPage(page) {
     if (!page) return;
-    const tool = TOOLS.find((t) => t.id === this.activeToolId);
-    const staysOnThePage = tool?.mode === 'viewer' || tool?.mode === 'any';
-
-    if (!staysOnThePage) {
-      this.selectTool(DEFAULT_TOOL, page);
-      return;
-    }
-
     this.currentPageId = page.id;
     this.showViewer();
     this.viewer.open(page);

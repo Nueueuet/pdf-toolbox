@@ -13,7 +13,7 @@ const convert = {
   id: 'convert',
   label: 'Convert',
   group: 'Convert',
-  mode: 'grid',
+  mode: 'any',
   icon: 'M4 7h11 M11 3l4 4-4 4 M20 17H9 M13 21l-4-4 4-4',
   blurb: 'Turn the document into images or a spreadsheet.',
   panel(ctx) {
@@ -144,7 +144,7 @@ const copyText = {
   id: 'copytext',
   label: 'Copy text',
   group: 'Convert',
-  mode: 'grid',
+  mode: 'any',
   icon: 'M9 3h9a2 2 0 0 1 2 2v9 M5 7h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Z',
   blurb: 'Select text straight off the pages and copy it. Dragging pages to reorder is paused while this is open.',
   panel(ctx) {
