@@ -1567,6 +1567,21 @@ button { font: inherit; }
   background: #fcfdfe;
 }
 
+/*
+ * A part of a split is named in a proper box, not in a line of text that turns
+ * into one when approached.
+ *
+ * The row itself gives up its frame for it: a bordered box inside a bordered
+ * row is two boxes to read where there is one thing to type. What follows the
+ * box — the extension, then which pages the part covers — sits after it, in the
+ * order it is read: this name, ending in .pdf, made of these pages.
+ */
+.partrow {
+  padding: 0;
+  border: none;
+  background: none;
+}
+
 .filerow__name, .partrow__name, .stamprow__name {
   flex: 1;
   min-width: 0;
@@ -1586,8 +1601,8 @@ button { font: inherit; }
   white-space: nowrap;
 }
 
-/* The part name is typed into, but reads as a label until you go near it. */
-input.partrow__name {
+/* A file's name in the merge list reads as a label until you go near it. */
+.filerow input.partrow__name {
   border: 1px solid transparent;
   border-radius: 6px;
   padding: 3px 6px;
@@ -1595,8 +1610,8 @@ input.partrow__name {
   font-family: inherit;
   color: var(--ink);
 }
-input.partrow__name:hover { background: var(--line-soft); }
-input.partrow__name:focus {
+.filerow input.partrow__name:hover { background: var(--line-soft); }
+.filerow input.partrow__name:focus {
   outline: none;
   background: var(--card);
   border-color: var(--blue);

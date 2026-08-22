@@ -56,17 +56,7 @@ function pageScope(ctx, { label = 'Pages' } = {}) {
 // ------------------------------------------------------------------- merge
 
 /**
- * Welche der Namen mehr als einmal vorkommen.
- *
- * Verglichen wird ohne Rücksicht auf Groß- und Kleinschreibung und ohne
- * umgebende Leerzeichen: Windows hält „Bild 1.pdf" und „bild 1.pdf" für
- * dieselbe Datei, also würde die zweite die erste stillschweigend ersetzen.
- *
- * @param {string[]} names
- * @returns {Set<number>} die Indizes der doppelten Einträge
- */
-/**
- * Puts the unremovable `.pdf` beside a name box, the way the split list does.
+ * Puts the unremovable `.pdf` beside a name box.
  *
  * Told in words — "saved as this, with .pdf added" — it is something to read and
  * believe. Shown beside the box, it is simply part of the name that happens not
@@ -84,6 +74,16 @@ function withExtension(labelled, input) {
   return labelled;
 }
 
+/**
+ * Which of the names appear more than once.
+ *
+ * Compared without regard to case or surrounding spaces: Windows holds
+ * "Bild 1.pdf" and "bild 1.pdf" to be the same file, so the second would quietly
+ * replace the first.
+ *
+ * @param {string[]} names
+ * @returns {Set<number>} the positions of the ones that clash
+ */
 function duplicateNames(names) {
   const seen = new Map();
   const clash = new Set();
@@ -341,7 +341,7 @@ const split = {
             row.classList.toggle('is-skipped', !keep.checked);
           },
         });
-        const name = h('input.partrow__name', {
+        const name = h('input.input.partrow__name', {
           // Without the extension: it is shown beside the box instead, where it
           // cannot be deleted. A PDF is a PDF.
           value: baseName(nameFor(index)),
