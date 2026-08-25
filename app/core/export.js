@@ -43,6 +43,10 @@ export async function buildPdf(ws, pages, opts = {}) {
     onProgress = null,
     title = null,
     includeOcr = true,
+    // Off means the pages as they came in — no text boxes, stamps or
+    // watermarks. Printing a form to fill in by hand wants the form, not the
+    // note stuck to it.
+    includeAnnots = true,
   } = opts;
 
   await primeFontMetrics();
@@ -74,7 +78,7 @@ export async function buildPdf(ws, pages, opts = {}) {
     onProgress?.(index / pages.length, `Page ${index + 1} of ${pages.length}`);
 
     if (needsRaster(ws, page, opts)) {
-      await addRasterPage(out, ws, page, { rasterDpi, rasterMime, jpegQuality });
+      await addRasterPage(out, ws, page, { rasterDpi, rasterMime, jpegQuality, includeAnnots });
       continue;
     }
 
@@ -103,8 +107,10 @@ export async function buildPdf(ws, pages, opts = {}) {
       await drawOcrLayer(copied, page.ocr.words, mapper, await embedFont('Helvetica', false, false));
     }
 
-    for (const annot of page.annots) {
-      await drawAnnotOnPage(copied, annot, mapper, embedFont);
+    if (includeAnnots) {
+      for (const annot of page.annots) {
+        await drawAnnotOnPage(copied, annot, mapper, embedFont);
+      }
     }
   }
 
@@ -164,9 +170,9 @@ async function drawOcrLayer(pdfPage, words, mapper, font) {
   }
 }
 
-async function addRasterPage(out, ws, page, { rasterDpi, rasterMime, jpegQuality }) {
+async function addRasterPage(out, ws, page, { rasterDpi, rasterMime, jpegQuality, includeAnnots = true }) {
   const scale = rasterDpi / 72;
-  const { canvas, winW, winH } = await renderPageCanvas(ws, page, { scale });
+  const { canvas, winW, winH } = await renderPageCanvas(ws, page, { scale, withAnnots: includeAnnots });
 
   // JPEG cannot carry transparency, so a transparent background forces PNG.
   const mime = page.bg?.mode === 'transparent' ? 'image/png' : rasterMime;

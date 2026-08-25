@@ -7,7 +7,7 @@ import {
 import { FONT_FAMILIES } from '../core/fonts.js';
 import { makeAnnot, applyMark } from '../core/annots.js';
 import { readableRuns, coloursOf } from '../core/retype.js';
-import { COUNTER_KINDS, fillCounter, hasCounter } from '../core/counter.js';
+import { COUNTER_KINDS, fillCounter, hasCounter, fillDate } from '../core/counter.js';
 import { parseRange } from '../util/ranges.js';
 import { pageScope } from './organize.js';
 import { toast } from '../ui/toast.js';
@@ -77,8 +77,31 @@ function textProperties(ctx, { onEdit }) {
   const rotation = numberInput({ value: 0, min: -180, max: 180, step: 1, oninput: (v) => update({ rotate: v }) });
   const text = textArea({ rows: 3, placeholder: 'Type here…', oninput: (v) => update({ text: v }) });
 
+  /**
+   * Puts a snippet where the caret is, rather than at the end.
+   *
+   * Typed out by hand, a date is four keystrokes and a moment's thought about
+   * which way round the month goes; the mark is worth even less typing and is
+   * right tomorrow as well.
+   */
+  const insertSnippet = (snippet) => {
+    if (!current) return;
+    const at = text.selectionStart ?? text.value.length;
+    const to = text.selectionEnd ?? at;
+    text.setRangeText(snippet, at, to, 'end');
+    text.focus();
+    update({ text: text.value });
+  };
+
+  const quick = h('div.inline',
+    button("Today's date", { onclick: () => insertSnippet(fillDate('<date>')) }),
+    button('<date>', { onclick: () => insertSnippet('<date>') }),
+  );
+
   const body = h('div',
     field('Text', text),
+    field('Quick blocks', quick,
+      '“Today’s date” writes the date now. “<date>” stays as it is and becomes the day of use — save the box as a stamp and every copy carries the date it was put down.'),
     h('div.grid2', field('Font', family), field('Size', size)),
     h('div.grid2', field('Colour', color), field('Opacity', opacity)),
     h('div.inline', bold, italic),
@@ -411,7 +434,21 @@ const stamps = {
     const byClick = checkbox({ label: 'Place where I click', checked: false });
 
     const put = (stamp, page, at) => {
-      const annot = makeAnnot({ ...stamp.annot, ...at, role: 'stamp', stampId: stamp.id });
+      /*
+       * `<date>` becomes today on the way onto the page, not in the stamp.
+       *
+       * That is the whole point of the mark: "Received <date>" saved once is
+       * right every day it is used, where a date typed into a stamp is right for
+       * one day and quietly wrong afterwards. What lands on the page is ordinary
+       * text and can be edited like any other.
+       */
+      const annot = makeAnnot({
+        ...stamp.annot,
+        text: fillDate(stamp.annot.text),
+        ...at,
+        role: 'stamp',
+        stampId: stamp.id,
+      });
       ctx.commit(`Insert ${stamp.name}`, () => page.annots.push(annot));
       ctx.editor.drawOverlay();
       // A stamp arrives with its wording already right, so the caret goes to the
@@ -425,7 +462,8 @@ const stamps = {
 
       if (!byClick.checked) return put(stamp, page, {});
 
-      const preview = makeAnnot({ ...stamp.annot });
+      // The ghost shows the date it will land with, not the mark.
+      const preview = makeAnnot({ ...stamp.annot, text: fillDate(stamp.annot.text) });
       ctx.app.viewer.armPlacement(preview, (target, at) => {
         ctx.app.viewer.disarmPlacement();
         put(stamp, target, at);

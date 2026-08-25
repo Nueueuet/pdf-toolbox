@@ -8,6 +8,7 @@ import { PageGrid } from './ui/pagegrid.js';
 import { TOOLS, GROUPS, DEFAULT_TOOL } from './tools/index.js';
 import { PageViewer } from './ui/pageviewer.js';
 import { loadViewerSettings, saveViewerSettings, DEFAULT_LAYOUT } from './tools/viewer.js';
+import { printBytes } from './tools/print.js';
 import { buildPdf } from './core/export.js';
 import { saveFile } from './core/download.js';
 import { primeFontMetrics } from './core/fonts.js';
@@ -581,6 +582,18 @@ class App {
         this.exportCurrent();
         return;
       }
+      /*
+       * Ctrl+P prints the document, not the window.
+       *
+       * Left to the browser it would print what is on screen: three columns of
+       * tool rail, thumbnails and panel, with the document a postage stamp in
+       * the middle of it. Nobody has ever wanted that.
+       */
+      if (meta && event.key.toLowerCase() === 'p' && this.ws.pageCount) {
+        event.preventDefault();
+        this.printDocument();
+        return;
+      }
       if ((event.key === 'Delete' || event.key === 'Backspace') && !typing) {
         // On a page these keys remove the selected box — but only when it was
         // picked up by its edge. With the caret in the text they belong to the
@@ -1088,6 +1101,26 @@ class App {
       tone: 'info',
       action: { label: 'Undo', onClick: () => this.ws.undo() },
     });
+  }
+
+  /**
+   * Prints the whole document, from wherever the reader happens to be.
+   *
+   * Opens the Print tool as it goes, so that what is being printed, and the
+   * choices about it, are in front of you rather than hidden behind a shortcut.
+   */
+  async printDocument() {
+    if (this.activeToolId !== 'print') this.selectTool('print');
+    if (this.printNow) return this.printNow();
+    const progress = progressToast('Preparing to print…');
+    try {
+      const bytes = await buildPdf(this.ws, this.ws.pages, this.exportOptions());
+      await printBytes(bytes);
+      progress.done('Sent to the printer');
+    } catch (err) {
+      console.error(err);
+      progress.fail(`Printing failed: ${err.message}`);
+    }
   }
 
   // ----------------------------------------------------------------- export

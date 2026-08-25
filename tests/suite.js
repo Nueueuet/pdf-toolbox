@@ -19,11 +19,12 @@ import { composeCrop } from '../app/core/geometry.js';
 import { primeFontMetrics } from '../app/core/fonts.js';
 import { PageGrid } from '../app/ui/pagegrid.js';
 import { PageViewer } from '../app/ui/pageviewer.js';
+import { printBytes } from '../app/tools/print.js';
 import { analysePage, existingTextBoxes } from '../app/core/coverage.js';
 import { ocrAvailable, ocrPage } from '../app/core/ocr.js';
 import { ocrLines } from '../app/ui/ocrlayer.js';
 import { readableRuns, coloursOf } from '../app/core/retype.js';
-import { fillCounter, hasCounter, markKind, setMarkKind } from '../app/core/counter.js';
+import { fillCounter, hasCounter, markKind, setMarkKind, fillDate, hasDate } from '../app/core/counter.js';
 import {
   targetOf, nameFromUrl, supported, turnOn, turnOff, reconcile, diagnose, looksLikePdf, workspaceFor,
 } from '../app/core/intercept.js';
@@ -935,6 +936,143 @@ test('continuous layout stacks every page', async () => {
     viewer.destroy();
     host.remove();
   }
+});
+
+test('printing hands the document to the browser, not the window', async () => {
+  /*
+   * Ctrl+P left to the browser prints what is on screen: a tool rail, a strip of
+   * thumbnails, a panel, and the document small in the middle. What is printed
+   * here is the document itself, built as a PDF with the edits on it and given
+   * to the browser's own print dialog through a frame.
+   *
+   * The dialog is not opened here — it would stop the run dead — so what is
+   * checked is everything up to it: a real PDF, a frame that loaded it, and the
+   * print call reaching that frame.
+   */
+  const ws = await loadWorkspace(['report.pdf']);
+  const page = ws.pages[0];
+  page.annots.push(makeAnnot({ text: 'On the print', x: 0.1, y: 0.1, w: 0.4, h: 0.08 }));
+
+  const bytes = await buildPdf(ws, [page], { includeAnnots: true });
+  assert(new TextDecoder().decode(bytes.slice(0, 5)) === '%PDF-', 'what was built is not a PDF');
+
+  let printed = null;
+  const frame = await printBytes(bytes, (f) => { printed = f; });
+  try {
+    assert(printed === frame, 'the print call did not reach the frame that holds the document');
+    assert(frame.isConnected, 'the frame was gone before the dialog could read it');
+    assert(frame.src.startsWith('blob:'), `the frame was pointed at ${frame.src.slice(0, 24)}`);
+  } finally {
+    frame.remove();
+    page.annots.pop();
+  }
+
+  // And the choice not to print what was written on the pages.
+  const bare = await buildPdf(ws, [page], { includeAnnots: false });
+  assert(bare.length !== bytes.length, 'leaving the annotations out changed nothing');
+});
+
+test('a page is redrawn at the size it is shown at', async () => {
+  /*
+   * A bitmap drawn for one scale and shown at another is soft. The rule that
+   * redraws during the zoom itself has to be generous, or every notch of the
+   * wheel would rasterise the document again — so 100% to 150% left the 100%
+   * picture stretched over half again its size, and only going on to 300% and
+   * back drew it properly. Which is exactly what "you have to zoom twice for it
+   * to come out sharp" looks like from the outside.
+   */
+  const ws = await loadWorkspace(['report.pdf']);
+  const host = document.createElement('div');
+  host.className = 'viewer';
+  host.style.cssText = 'position:fixed;left:0;top:0;width:800px;height:600px;opacity:0;z-index:9999';
+  document.body.appendChild(host);
+
+  const viewer = new PageViewer(host, ws, {});
+  try {
+    await viewer.open(ws.pages[0]);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+
+    const settle = async () => new Promise((resolve) => setTimeout(resolve, 700));
+    const sizes = () => {
+      const frame = onStage(host);
+      const canvas = frame.querySelector('canvas');
+      const box = frame.getBoundingClientRect();
+      return { drawn: canvas?.width ?? 0, shown: box.width };
+    };
+
+    for (const zoom of [1, 1.5, 1.25, 2]) {
+      viewer.setZoom(zoom);
+      await settle();
+      const { drawn, shown } = sizes();
+      const ratio = drawn / (shown * (window.devicePixelRatio || 1));
+      assert(ratio > 0.9 && ratio < 1.1,
+        `at ${zoom * 100}% the page is drawn ${drawn}px wide and shown ${Math.round(shown)}px wide`);
+    }
+  } finally {
+    viewer.destroy();
+    host.remove();
+  }
+});
+
+test('fitting the window really fits the window', async () => {
+  /*
+   * Fitting is measured against the window, and laying out changes the window:
+   * coming from a zoomed-in page there are scrollbars, and the room they take is
+   * not room the page can have. Measured once, the page came out a few per cent
+   * short of the window it was meant to fill — and short by a different amount
+   * depending on where the zoom had been before, which is the sort of thing that
+   * makes a button feel broken.
+   */
+  const ws = await loadWorkspace(['report.pdf']);
+  const host = document.createElement('div');
+  host.className = 'viewer';
+  host.style.cssText = 'position:fixed;left:0;top:0;width:800px;height:600px;opacity:0;z-index:9999';
+  document.body.appendChild(host);
+
+  const viewer = new PageViewer(host, ws, {});
+  try {
+    await viewer.open(ws.pages[0]);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    viewer.setZoom(null);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const fromCold = onStage(host).getBoundingClientRect().width;
+
+    viewer.setZoom(3);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    viewer.setZoom(null);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const fromZoomedIn = onStage(host).getBoundingClientRect().width;
+
+    assert(Math.abs(fromCold - fromZoomedIn) < 2,
+      `fit gave ${Math.round(fromCold)}px from cold but ${Math.round(fromZoomedIn)}px after zooming in`);
+
+    const page = onStage(host).getBoundingClientRect();
+    const view = viewer.scroller.getBoundingClientRect();
+    assert(page.width <= view.width + 1 && page.height <= view.height + 1, 'the fitted page does not fit');
+    assert(!viewer.canScroll(), 'a fitted page should have nothing to scroll');
+  } finally {
+    viewer.destroy();
+    host.remove();
+  }
+});
+
+test('<date> is written out when the text lands on the page', async () => {
+  const when = new Date(2026, 7, 25);
+  const written = when.toLocaleDateString(undefined, { year: 'numeric', month: '2-digit', day: '2-digit' });
+
+  assert(hasDate('Eingegangen <date>'), 'the mark was not recognised');
+  assert(!hasDate('Eingegangen am 25.08.2026'), 'a plain date was taken for the mark');
+  assert(fillDate('Eingegangen <date>', when) === `Eingegangen ${written}`, 'the mark was not filled in');
+  // Written the way this machine writes dates, with two digits either side.
+  assert(/^\d{2}[^\d]\d{2}[^\d]\d{4}$|^\d{2}\/\d{2}\/\d{4}$/.test(written), `unexpected date shape: ${written}`);
+  assert(fillDate('<DATE> and <date>', when) === `${written} and ${written}`, 'the mark is case-sensitive');
+  assert(fillDate('nothing here', when) === 'nothing here', 'text without the mark');
+  // A stamp saved with the mark keeps it; only the copy on the page is dated.
+  const stamp = { text: 'Received <date>' };
+  const placed = { ...stamp, text: fillDate(stamp.text, when) };
+  assert(stamp.text === 'Received <date>', 'filling in changed the stamp itself');
+  assert(placed.text === `Received ${written}`, 'the placed copy was not dated');
 });
 
 test('no tool takes away the choice of where you are', async () => {

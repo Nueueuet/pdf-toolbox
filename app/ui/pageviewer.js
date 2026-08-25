@@ -181,6 +181,7 @@ export class PageViewer {
     window.removeEventListener('resize', this.onResize);
     this.visibility?.disconnect();
     this.offCuts?.();
+    clearTimeout(this.sharpenTimer);
   }
 
   // -------------------------------------------------------------- split cuts
@@ -248,7 +249,19 @@ export class PageViewer {
   setZoom(zoom) {
     const centre = this.centreFraction();
     this.zoom = zoom === null ? null : Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
+    const before = this.effectiveZoom();
     this.relayout();
+
+    /*
+     * Fitting is measured against the window, and laying out changes the window.
+     *
+     * Coming from a zoomed-in page there are scrollbars, and the room they take
+     * is not room the page can have — so the size worked out for "fit" is a size
+     * for a smaller window than the one the page ends up in. Once it fits, the
+     * scrollbars go, and the page sits a few per cent short of the window it was
+     * meant to fill. Measured again now that they have gone, it fills it.
+     */
+    if (this.zoom === null && Math.abs(this.effectiveZoom() - before) > 0.005) this.relayout();
     // Zooming keeps whatever was in the middle in the middle. Without this the
     // view would snap back to a corner every time the margins change size.
     this.restoreCentre(centre);
@@ -782,8 +795,9 @@ export class PageViewer {
         el.style.transform = `scale(${scale})`;
       }
 
-      // A page whose bitmap was drawn for a very different scale is redrawn, so
-      // zooming in does not just enlarge a blurry picture.
+      // A page whose bitmap was drawn for a very different scale is redrawn at
+      // once, so a big jump in zoom does not show a blown-up picture even for a
+      // moment. Smaller differences are left to the sharpening pass below.
       const drawn = Number(frame.dataset.drawnScale || 0);
       if (drawn && (scale / drawn > 1.5 || drawn / scale > 2.5)) frame.dataset.needsRedraw = '1';
 
@@ -803,6 +817,40 @@ export class PageViewer {
       y += height + PAGE_GAP;
     }
     this.root.classList.toggle('is-fit', !this.canScroll());
+    this.sharpenSoon();
+  }
+
+  /**
+   * Redraws pages at the size they are actually being shown at.
+   *
+   * A bitmap drawn for one scale and shown at another is soft, and the rule that
+   * decides when to redraw during the zoom itself has to be generous or every
+   * notch of the wheel would rasterise the document again. So 100% to 150% left
+   * the 100% picture stretched over half again its size — and going on to 300%
+   * and back drew it properly, which is why it looked like zooming had to be
+   * done twice to come out sharp.
+   *
+   * Waiting for the zooming to stop is what makes it affordable: a gesture of
+   * ten notches redraws once, at the end, at the size that was settled on.
+   */
+  sharpenSoon() {
+    clearTimeout(this.sharpenTimer);
+    this.sharpenTimer = setTimeout(() => this.sharpen(), 180);
+  }
+
+  sharpen() {
+    const scale = this.effectiveZoom();
+    for (const [id, frame] of this.frames) {
+      const drawn = Number(frame.dataset.drawnScale || 0);
+      // A hair either way is not worth redrawing for; anything more shows.
+      if (!drawn || Math.abs(drawn - scale) / scale < 0.02) continue;
+      // Pages out of view are left alone — they are redrawn when they come into
+      // view — but the ones standing by in single layout are the next page and
+      // are wanted sharp before they are turned to.
+      if (!frame.classList.contains('is-offstage') && !this.isVisible(frame)) continue;
+      frame.dataset.needsRedraw = '1';
+      this.paint(frame, id);
+    }
   }
 
   /** True when the content is larger than the window, i.e. panning does something. */

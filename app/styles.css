@@ -1628,6 +1628,23 @@ input.partrow__name.is-clashing {
   color: var(--danger);
 }
 
+/*
+ * The frame the print dialog reads from.
+ *
+ * Off the screen rather than `display: none`: a frame that is not laid out is
+ * not loaded either, and there would be nothing for the dialog to print.
+ */
+.printframe {
+  position: fixed;
+  width: 1px;
+  height: 1px;
+  left: -9999px;
+  top: 0;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
 /* A name box with its extension beside it. */
 .namerow {
   display: flex;

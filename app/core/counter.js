@@ -1,5 +1,6 @@
 /**
- * Counting placeholders in a text box: {n}, {a}, {A}, {i}, {I}.
+ * Placeholders in a text box: the counting marks {n}, {a}, {A}, {i}, {I}, and
+ * `<date>` for the day it goes on the page.
  *
  * A text box copied across a document is nearly always the same words on every
  * page except for one thing that has to move on — a page number, an exhibit
@@ -70,6 +71,35 @@ export function fillCounter(text, index, { start = 1, step = 1 } = {}) {
     if (value < 1 && kind !== 'n') return whole;
     return KINDS[kind].format(value);
   });
+}
+
+/** Today, written where `<date>` was typed. */
+const DATE_MARK = /<date>/gi;
+
+export function hasDate(text) {
+  DATE_MARK.lastIndex = 0;
+  return DATE_MARK.test(String(text ?? ''));
+}
+
+/**
+ * Fills in `<date>` with the day the text is being put on the page.
+ *
+ * A stamp is the reason this exists: "Received <date>" saved once writes the
+ * right day every time it is used, which a stamp with a date typed into it
+ * stops doing the moment the day turns over. The stamp itself keeps the mark —
+ * only the copy that lands on the page gets a date.
+ *
+ * Written the way this machine writes dates. A document stamped here is read
+ * here, and 25.08.2026 or 8/25/2026 is whichever of those the reader expects.
+ *
+ * @param {string} text
+ * @param {Date} [when] the day to write, for testing
+ */
+export function fillDate(text, when = new Date()) {
+  // Two digits for the day and the month: 25.08.2026 rather than 25.8.2026,
+  // which is how a date on a document is written wherever dates are written.
+  const written = when.toLocaleDateString(undefined, { year: 'numeric', month: '2-digit', day: '2-digit' });
+  return String(text ?? '').replace(DATE_MARK, () => written);
 }
 
 /** 1 -> A, 26 -> Z, 27 -> AA, the way spreadsheet columns are named. */
