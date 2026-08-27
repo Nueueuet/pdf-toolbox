@@ -1,4 +1,5 @@
 import viewer from './viewer.js';
+import save from './save.js';
 import print from './print.js';
 import organize from './organize.js';
 import optimize from './optimize.js';
@@ -13,7 +14,7 @@ import security from './security.js';
  * rather than sending the user to a separate page per feature.
  */
 /** Viewer comes first: reading a document precedes changing it. */
-export const TOOLS = [...viewer, ...print, ...organize, ...optimize, ...content, ...convert, ...ocr, ...security];
+export const TOOLS = [...viewer, ...save, ...print, ...organize, ...optimize, ...content, ...convert, ...ocr, ...security];
 
 /** The tool a freshly opened document lands in. */
 export const DEFAULT_TOOL = 'viewer';

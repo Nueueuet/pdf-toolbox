@@ -435,20 +435,13 @@ const stamps = {
 
     const put = (stamp, page, at) => {
       /*
-       * `<date>` becomes today on the way onto the page, not in the stamp.
+       * The mark travels with the stamp rather than being spent on the way.
        *
-       * That is the whole point of the mark: "Received <date>" saved once is
-       * right every day it is used, where a date typed into a stamp is right for
-       * one day and quietly wrong afterwards. What lands on the page is ordinary
-       * text and can be edited like any other.
+       * A stamp carrying `<date>` is right every day it is used; the box it puts
+       * down keeps the mark and shows the date, so it is still right tomorrow.
+       * Double-clicking the date brings the mark back to be edited.
        */
-      const annot = makeAnnot({
-        ...stamp.annot,
-        text: fillDate(stamp.annot.text),
-        ...at,
-        role: 'stamp',
-        stampId: stamp.id,
-      });
+      const annot = makeAnnot({ ...stamp.annot, ...at, role: 'stamp', stampId: stamp.id });
       ctx.commit(`Insert ${stamp.name}`, () => page.annots.push(annot));
       ctx.editor.drawOverlay();
       // A stamp arrives with its wording already right, so the caret goes to the

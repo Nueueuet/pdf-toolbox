@@ -24,7 +24,9 @@ import { analysePage, existingTextBoxes } from '../app/core/coverage.js';
 import { ocrAvailable, ocrPage } from '../app/core/ocr.js';
 import { ocrLines } from '../app/ui/ocrlayer.js';
 import { readableRuns, coloursOf } from '../app/core/retype.js';
-import { fillCounter, hasCounter, markKind, setMarkKind, fillDate, hasDate } from '../app/core/counter.js';
+import {
+  fillCounter, hasCounter, markKind, setMarkKind, fillDate, hasDate, fillDateWithMarks, rawOffset,
+} from '../app/core/counter.js';
 import {
   targetOf, nameFromUrl, supported, turnOn, turnOff, reconcile, diagnose, looksLikePdf, workspaceFor,
 } from '../app/core/intercept.js';
@@ -1073,6 +1075,112 @@ test('<date> is written out when the text lands on the page', async () => {
   const placed = { ...stamp, text: fillDate(stamp.text, when) };
   assert(stamp.text === 'Received <date>', 'filling in changed the stamp itself');
   assert(placed.text === `Received ${written}`, 'the placed copy was not dated');
+});
+
+test('a box shows the date and edits the mark', async () => {
+  /*
+   * `<date>` is a mark, and a page is not the place to read marks: at rest the
+   * box shows the date it will print. What can be edited is the mark, so the
+   * mark is what comes back when the caret goes in — and the date returns when
+   * it leaves. The text kept on the page is the mark throughout, which is what
+   * makes it still right tomorrow.
+   *
+   * The swap and the caret are checked here; the focus events that drive them
+   * only fire in a window that has the system's focus, which a test run does
+   * not.
+   */
+  const when = new Date(2026, 7, 27);
+  const written = fillDate('<date>', when);
+
+  assert(rawOffset('Received <date> now', 5, when) === 5, 'before the date');
+  assert(rawOffset('Received <date> now', 9, when) === 9, 'at the start of the date');
+  assert(rawOffset('Received <date> now', 9 + written.length - 1, when) === 15,
+    'inside the date, which is not a place a caret can usefully sit');
+  assert(rawOffset(`Received <date> now`, 9 + written.length + 2, when) === 17, 'after the date');
+
+  const marked = fillDateWithMarks('Received <date> now', [{ start: 16, end: 19, color: '#ff0' }], when);
+  assert(marked.text === `Received ${written} now`, 'the date was not written out');
+  assert(marked.marks[0].start === 16 + (written.length - 6), 'the highlight did not move with the words');
+
+  const ws = await loadWorkspace(['report.pdf']);
+  const page = ws.pages[0];
+  const annot = makeAnnot({ text: 'Received <date>', x: 0.1, y: 0.1, w: 0.5, h: 0.08 });
+  page.annots.push(annot);
+
+  const host = document.createElement('div');
+  host.className = 'viewer';
+  host.style.cssText = 'position:fixed;left:0;top:0;width:800px;height:600px;opacity:0;z-index:9999';
+  document.body.appendChild(host);
+  const viewer = new PageViewer(host, ws, {});
+  try {
+    await viewer.open(page);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+
+    const text = () => host.querySelector(`.abox[data-id="${annot.id}"] .abox__text`);
+    assert(text(), 'the box was never drawn');
+    assert(text().textContent === `Received ${fillDate('<date>')}`,
+      `at rest the box shows "${text().textContent}"`);
+
+    const layer = viewer.layers.get(page.id);
+    layer.showMarkFor(annot, text());
+    assert(text().textContent === 'Received <date>',
+      `opened for editing the box shows "${text().textContent}"`);
+
+    // While the caret is in it, the panel's highlighting works on the mark too.
+    layer.refreshText(annot);
+    assert(text().textContent === 'Received <date>',
+      'the box being typed into went back to showing the date');
+
+    // Anything that draws the box afresh shows the date again.
+    text().blur();
+    layer.draw();
+    assert(text().textContent === `Received ${fillDate('<date>')}`, 'the date did not come back');
+    assert(annot.text === 'Received <date>', 'the mark was spent instead of kept');
+
+    // And what actually gets printed.
+    const bytes = await buildPdf(ws, [page], {});
+    const doc = await pdfjsLib.getDocument({ data: bytes.slice() }).promise;
+    const content = await (await doc.getPage(1)).getTextContent();
+    const printed = content.items.map((item) => item.str).join(' ');
+    assert(printed.includes(fillDate('<date>')), 'the saved file does not carry the date');
+    assert(!printed.includes('<date>'), 'the saved file carries the mark instead of a date');
+  } finally {
+    page.annots.pop();
+    viewer.destroy();
+    host.remove();
+  }
+});
+
+test('renaming the document does not redraw it', async () => {
+  /*
+   * Renaming used to go through the same path as adding or removing a page,
+   * which rebuilds every frame. Typed into a panel that reports every keystroke,
+   * that meant the document flickering under the name being typed.
+   */
+  const ws = await loadWorkspace(['report.pdf']);
+  const host = document.createElement('div');
+  host.className = 'viewer';
+  host.style.cssText = 'position:fixed;left:0;top:0;width:800px;height:600px;opacity:0;z-index:9999';
+  document.body.appendChild(host);
+
+  const viewer = new PageViewer(host, ws, {});
+  try {
+    await viewer.open(ws.pages[0]);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const before = viewer.frames.get(ws.pages[0].id);
+    const canvasBefore = before.querySelector('canvas');
+    assert(canvasBefore, 'the page was never drawn in the first place');
+
+    // What a panel does on every keystroke of a new name.
+    for (const name of ['R', 'Re', 'Rep', 'Repo', 'Report']) ws.name = name;
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    assert(viewer.frames.get(ws.pages[0].id) === before, 'the page was rebuilt for a change of name');
+    assert(before.querySelector('canvas') === canvasBefore, 'the page was redrawn for a change of name');
+  } finally {
+    viewer.destroy();
+    host.remove();
+  }
 });
 
 test('no tool takes away the choice of where you are', async () => {

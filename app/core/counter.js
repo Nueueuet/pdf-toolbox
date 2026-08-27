@@ -96,10 +96,76 @@ export function hasDate(text) {
  * @param {Date} [when] the day to write, for testing
  */
 export function fillDate(text, when = new Date()) {
-  // Two digits for the day and the month: 25.08.2026 rather than 25.8.2026,
-  // which is how a date on a document is written wherever dates are written.
-  const written = when.toLocaleDateString(undefined, { year: 'numeric', month: '2-digit', day: '2-digit' });
-  return String(text ?? '').replace(DATE_MARK, () => written);
+  return String(text ?? '').replace(DATE_MARK, () => writtenDate(when));
+}
+
+/**
+ * Two digits for the day and the month: 25.08.2026 rather than 25.8.2026, which
+ * is how a date on a document is written wherever dates are written.
+ */
+function writtenDate(when) {
+  return when.toLocaleDateString(undefined, { year: 'numeric', month: '2-digit', day: '2-digit' });
+}
+
+/**
+ * The same, with the highlights kept over the words they were put on.
+ *
+ * A mark is a pair of character offsets, and writing out `<date>` makes the text
+ * longer — six characters become ten. Left alone, every highlight after a date
+ * would slide four characters to the left of the words it belongs to.
+ *
+ * @param {string} text as typed, marks and all
+ * @param {{start: number, end: number, color: string}[]} marks
+ * @param {Date} [when]
+ */
+export function fillDateWithMarks(text, marks, when = new Date()) {
+  const source = String(text ?? '');
+  if (!hasDate(source)) return { text: source, marks: marks ?? [] };
+
+  const written = writtenDate(when);
+  const grew = written.length - '<date>'.length;
+  const at = [];
+  DATE_MARK.lastIndex = 0;
+  for (let found = DATE_MARK.exec(source); found; found = DATE_MARK.exec(source)) at.push(found.index);
+
+  // A mark that starts after a date is pushed along by however much each date
+  // before it grew.
+  const moved = (offset) => offset + at.filter((index) => index < offset).length * grew;
+  return {
+    text: source.replace(DATE_MARK, () => written),
+    marks: (marks ?? []).map((mark) => ({ ...mark, start: moved(mark.start), end: moved(mark.end) })),
+  };
+}
+
+/**
+ * Where an offset in the written-out text sits in the text as it was typed.
+ *
+ * Used to keep the caret still while a box swaps a date for the mark behind it:
+ * click into the middle of "Received 27.08.2026" and the caret should stay in
+ * the middle of "Received <date>", not jump to one end. An offset inside the
+ * date itself comes back as the end of the mark, the mark being the smallest
+ * thing that can be edited.
+ *
+ * @param {string} text as typed
+ * @param {number} offset a position in the written-out text
+ * @param {Date} [when]
+ */
+export function rawOffset(text, offset, when = new Date()) {
+  const source = String(text ?? '');
+  if (!hasDate(source)) return offset;
+
+  const written = writtenDate(when);
+  let raw = 0;
+  let shown = 0;
+  DATE_MARK.lastIndex = 0;
+  for (let found = DATE_MARK.exec(source); found; found = DATE_MARK.exec(source)) {
+    const plain = found.index - raw;
+    if (shown + plain >= offset) return raw + (offset - shown);
+    raw = found.index + found[0].length;
+    shown += plain + written.length;
+    if (shown >= offset) return raw;
+  }
+  return raw + (offset - shown);
 }
 
 /** 1 -> A, 26 -> Z, 27 -> AA, the way spreadsheet columns are named. */

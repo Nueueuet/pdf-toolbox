@@ -6,6 +6,7 @@
  * exporter. Keeping a single layout pass is what makes the preview trustworthy.
  */
 import { wrapText, widthOf, lineHeightOf, cssFamilyFor, sanitize } from './fonts.js';
+import { fillDateWithMarks } from './counter.js';
 import { uid } from '../util/format.js';
 
 export const DEFAULT_ANNOT = {
@@ -109,6 +110,17 @@ const ASCENT = 0.75;
  * @param {number} winH visible page height in points
  */
 export function layoutAnnot(annot, winW, winH) {
+  /*
+   * `<date>` is written out here, at the last moment before anything is drawn.
+   *
+   * The box keeps the mark — that is what makes it a date that stays today, on
+   * the page as in a stamp — and everything that shows the box, on screen and in
+   * the saved file alike, goes through this one function. So this is where the
+   * mark becomes a date, and there is no way to draw one without the other.
+   */
+  const shown = fillDateWithMarks(annot.text, annot.marks);
+  annot = { ...annot, text: shown.text, marks: shown.marks };
+
   const box = {
     x: annot.x * winW,
     y: annot.y * winH,

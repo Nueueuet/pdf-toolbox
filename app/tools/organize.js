@@ -117,7 +117,9 @@ const merge = {
       placeholder: 'document',
       oninput: (value) => {
         ctx.ws.name = value.trim() || 'document';
-        ctx.app.onPagesChanged();
+        // Only the caption follows: redrawing the document for a change of name
+        // made it flicker under every keystroke.
+        ctx.app.syncDocName();
       },
     });
     // The title bar edits the same name, so it has to be followed back.
@@ -819,4 +821,4 @@ function groupRemovedByFile(ws) {
 }
 
 export default [merge, split, remove, rotate, mirror, crop];
-export { pageScope };
+export { pageScope, withExtension };

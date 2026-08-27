@@ -11,6 +11,7 @@
  * is correct at any scale without being told about zoom at all.
  */
 import { h, icon } from '../util/dom.js';
+import { fillDateWithMarks, hasDate, rawOffset } from '../core/counter.js';
 import { cssFamilyFor } from '../core/fonts.js';
 import { normalizeMarks } from '../core/annots.js';
 import { normalizeCrop } from '../core/geometry.js';
@@ -134,6 +135,7 @@ export class AnnotationLayer {
 
     text.addEventListener('focus', () => {
       editedFrom = { text: annot.text, marks: annot.marks.map((m) => ({ ...m })) };
+      this.showMarkFor(annot, text);
     });
 
     text.addEventListener('input', () => {
@@ -144,8 +146,12 @@ export class AnnotationLayer {
     });
 
     text.addEventListener('blur', () => {
+      // A blur of our own making, from swapping the date for the mark.
+      if (this.swapping) return;
       const before = editedFrom;
       editedFrom = null;
+      // Back to the page's own reading of it.
+      if (hasDate(annot.text)) renderMarkedText(text, annot);
       if (!before || before.text === annot.text) {
         this.handlers.onChange();
         return;
@@ -175,6 +181,35 @@ export class AnnotationLayer {
     restoreSelection(text, at === 'all' ? { start: 0, end: length } : { start: length, end: length });
   }
 
+  /**
+   * Puts the mark back in a box that is showing a date, ready to be edited.
+   *
+   * Replacing the words of an element that has the caret in it takes the caret
+   * out, and the box then reports that it has been left — which would put the
+   * date straight back and undo this. So the caret is noted, the swap is flagged
+   * as ours, and the caret is put back where it was: click into the middle of
+   * "Received 27.08.2026" and the caret is in the middle of "Received <date>".
+   */
+  showMarkFor(annot, text) {
+    // Putting the caret back sends the box a second focus, which would arrive
+    // here again — and so on, without this.
+    if (this.swapping || !hasDate(annot.text)) return;
+    const at = selectionOffsets(text);
+    this.swapping = true;
+    try {
+      renderMarkedText(text, annot, { raw: true });
+      text.focus({ preventScroll: true });
+      if (at) {
+        restoreSelection(text, {
+          start: rawOffset(annot.text, at.start),
+          end: rawOffset(annot.text, at.end),
+        });
+      }
+    } finally {
+      this.swapping = false;
+    }
+  }
+
   textOf(id) {
     return this.el.querySelector(`.abox[data-id="${id}"] .abox__text`) ?? null;
   }
@@ -196,7 +231,9 @@ export class AnnotationLayer {
     const text = this.textOf(annot.id);
     if (!text) return;
     const selection = selectionOffsets(text);
-    renderMarkedText(text, annot);
+    // Highlighting from the panel happens with the caret still in the box, and
+    // what is being highlighted there is what was typed.
+    renderMarkedText(text, annot, { raw: document.activeElement === text });
     if (selection) restoreSelection(text, selection);
   }
 
@@ -426,10 +463,25 @@ function segmentsOf(text, marks) {
   return segments;
 }
 
-/** Paints `annot.text` into a contenteditable element, highlights and all. */
-export function renderMarkedText(el, annot) {
-  const text = String(annot.text ?? '');
-  el.replaceChildren(...segmentsOf(text, annot.marks).map((segment) => {
+/**
+ * Paints `annot.text` into a contenteditable element, highlights and all.
+ *
+ * A box carrying `<date>` shows the date, not the mark — it is a page, and a
+ * page says what it says. Put the caret in it and the mark comes back, because
+ * that is the thing that can be edited; leave it and the date returns. Which is
+ * why this takes an explicit choice rather than guessing: the caller knows
+ * whether it is about to be typed into.
+ *
+ * @param {HTMLElement} el
+ * @param {object} annot
+ * @param {{raw?: boolean}} [opts] raw for the box being edited
+ */
+export function renderMarkedText(el, annot, { raw = false } = {}) {
+  const shown = raw
+    ? { text: String(annot.text ?? ''), marks: annot.marks }
+    : fillDateWithMarks(annot.text, annot.marks);
+  const text = shown.text;
+  el.replaceChildren(...segmentsOf(text, shown.marks).map((segment) => {
     if (!segment.color) return document.createTextNode(segment.text);
     const span = document.createElement('span');
     span.dataset.hl = segment.color;

@@ -516,9 +516,17 @@ class App {
       this.persistViewerSettings();
     });
 
-    this.el.docTitle.addEventListener('change', () => {
+    /*
+     * Renaming is not an edit to the document.
+     *
+     * It used to go through the same path as adding or removing a page, which
+     * redraws every thumbnail and rebuilds the viewer — for a change of caption.
+     * Typed into the merge panel, that fired on every keystroke, and the
+     * document flickered under the name being typed.
+     */
+    this.el.docTitle.addEventListener('input', () => {
       this.ws.name = this.el.docTitle.value.trim() || 'document';
-      this.onPagesChanged();
+      this.syncDocName();
     });
   }
 
