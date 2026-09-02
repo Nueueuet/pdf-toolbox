@@ -501,6 +501,9 @@ button { font: inherit; }
 
 .grid.is-textmode .pcard__shell .textlayer {
   pointer-events: auto;
+}
+
+.grid.is-textmode .pcard__shell .textlayer :is(span, br) {
   user-select: text;
   -webkit-user-select: text;
 }
@@ -916,7 +919,11 @@ button { font: inherit; }
   top: 0;
   left: 0;
   transform-origin: 0 0;
-  user-select: text;
+  /*
+   * Deliberately not selectable itself — only its words are, further down. A
+   * press in the space between words would otherwise anchor here, and the
+   * selection would run through the words in the order the file stores them.
+   */
 }
 
 /*
@@ -1099,6 +1106,20 @@ button { font: inherit; }
   z-index: 1;
 }
 
+/*
+ * The layer itself is not selectable; its words are.
+ *
+ * Most of a page is the space between the words, and a press there gave the
+ * browser the layer to anchor to — from which it dragged the selection through
+ * the pieces in the order the file stores them rather than the order they are
+ * read in. With nothing to catch hold of in the gaps, such a press is taken to
+ * the nearest word instead (see textselect.js).
+ */
+.textlayer {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
 .textlayer span,
 .textlayer br {
   position: absolute;
@@ -1106,6 +1127,8 @@ button { font: inherit; }
   white-space: pre;
   cursor: text;
   transform-origin: 0 0;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .textlayer ::selection { background: rgba(13, 139, 242, .3); }
@@ -1121,11 +1144,25 @@ button { font: inherit; }
   line-height: 1;
 }
 
-/* pdf.js marks the end of the text with this; it must not be selectable. */
+/*
+ * The catcher for everything between the words.
+ *
+ * A page's text is a scattering of absolutely positioned pieces with gaps
+ * everywhere — between columns, inside tables, down the margins. Press in one of
+ * those gaps and the browser has no word to anchor to, so it anchors in the
+ * layer itself and drags the selection through the pieces in the order the file
+ * happens to store them, which is not the order they are read in: a short drag
+ * over two lines comes back with half the page in no sensible order.
+ *
+ * While a selection is being made, this element covers the whole layer from
+ * behind — unselectable, and below the words, so it takes every press that
+ * lands on nothing and the words go on taking their own.
+ */
 .textlayer .endOfContent {
   position: absolute;
   inset: 100% 0 0;
   display: block;
+  z-index: -1;
   cursor: default;
   user-select: none;
 }

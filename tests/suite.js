@@ -20,6 +20,7 @@ import { primeFontMetrics } from '../app/core/fonts.js';
 import { PageGrid } from '../app/ui/pagegrid.js';
 import { PageViewer } from '../app/ui/pageviewer.js';
 import { printBytes } from '../app/tools/print.js';
+import { textPositionAt } from '../app/ui/textselect.js';
 import { analysePage, existingTextBoxes } from '../app/core/coverage.js';
 import { ocrAvailable, ocrPage } from '../app/core/ocr.js';
 import { ocrLines } from '../app/ui/ocrlayer.js';
@@ -974,6 +975,106 @@ test('printing hands the document to the browser, not the window', async () => {
   assert(bare.length !== bytes.length, 'leaving the annotations out changed nothing');
 });
 
+test('a press between the words finds the nearest word', async () => {
+  /*
+   * Most of a page is the space between the words. A press there gave the
+   * browser nothing to anchor to, so it anchored in the text layer itself and
+   * ran the selection through the pieces in the order the file stores them — a
+   * drag over two lines of a form came back with half the page, jumbled.
+   *
+   * The catch is which word counts as nearest. A run written at an angle reports
+   * the upright box it fits inside: the watermark below is 40pt text set corner
+   * to corner, and the rectangle it claims covers most of the sheet, making it
+   * the nearest thing to every point on the page. It is skipped for this, and
+   * only for this — pressing on the watermark itself still selects it, because
+   * the browser hit-tests the turned shape rather than the box.
+   */
+  const doc = await PDFDocument.create();
+  const sheet = doc.addPage([595, 842]);
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  sheet.drawText('First line of the page', { x: 60, y: 700, size: 12, font });
+  sheet.drawText('Second line, further down', { x: 60, y: 660, size: 12, font });
+  sheet.drawText('unverbindlicher Einzelblattausdruck', { x: 60, y: 160, size: 40, font, rotate: degrees(45) });
+  const bytes = await doc.save();
+
+  const ws = new Workspace();
+  await ws.addFiles([new File([bytes], 'gaps.pdf', { type: 'application/pdf' })]);
+
+  const host = document.createElement('div');
+  host.className = 'viewer';
+  host.style.cssText = 'position:fixed;left:0;top:0;width:800px;height:600px;opacity:0;z-index:9999';
+  document.body.appendChild(host);
+
+  const viewer = new PageViewer(host, ws, {});
+  try {
+    await viewer.open(ws.pages[0]);
+    viewer.setZoom(1);
+    await new Promise((resolve) => setTimeout(resolve, 900));
+
+    const layer = onStage(host).querySelector('.textlayer');
+    const spans = [...layer.children].filter((el) => el.tagName === 'SPAN' && el.textContent.trim());
+    const wordFor = (text) => spans.find((s) => s.textContent.startsWith(text));
+    const first = wordFor('First');
+    const slanted = wordFor('unverbindlicher');
+    assert(first && slanted, 'the sample page did not come out as expected');
+
+    // Well past the end of the first line, in the empty right-hand margin.
+    const box = first.getBoundingClientRect();
+    const spot = textPositionAt(layer, box.right + 160, box.top + box.height / 2);
+    assert(spot, 'a press in the margin found nothing at all');
+    assert(spot.node.parentElement === first,
+      `a press beside the first line landed in "${spot.node.parentElement.textContent.slice(0, 24)}"`);
+
+    // The watermark's own rectangle covers that point; it is not what was meant.
+    const claimed = slanted.getBoundingClientRect();
+    assert(claimed.width > 300 && claimed.height > 300,
+      'the sample watermark should report an oversized box, or this proves nothing');
+    assert(claimed.left <= box.right + 160 && claimed.right >= box.right + 160,
+      'the watermark should be claiming the point that was pressed');
+  } finally {
+    viewer.destroy();
+    host.remove();
+  }
+});
+
+test('jumping to a page draws that page, not the way there', async () => {
+  /*
+   * Pages are drawn as they come into view. Scrolling smoothly to page 30 drags
+   * the window across the twenty-nine before it, so all of them come into view,
+   * all of them are drawn, and the one actually asked for arrives last — after
+   * the work nobody wanted. Asking for a page by number is an arrival, not a
+   * journey.
+   */
+  const ws = await loadWorkspace(['long.pdf']);
+  const host = document.createElement('div');
+  host.className = 'viewer';
+  host.style.cssText = 'position:fixed;left:0;top:0;width:800px;height:600px;opacity:0;z-index:9999';
+  document.body.appendChild(host);
+
+  const viewer = new PageViewer(host, ws, {});
+  try {
+    viewer.setLayout('continuous');
+    await viewer.open(ws.pages[0]);
+    viewer.setZoom(0.5);
+    await new Promise((resolve) => setTimeout(resolve, 700));
+
+    const target = ws.pages[29];
+    viewer.goTo(target.id);
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+
+    const drawn = [...viewer.frames]
+      .filter(([, frame]) => frame.dataset.drawnScale)
+      .map(([id]) => ws.indexOf(id) + 1);
+    const onTheWay = drawn.filter((number) => number > 4 && number < 28);
+    assert(onTheWay.length === 0, `${onTheWay.length} pages between were drawn on the way: ${onTheWay.slice(0, 6)}`);
+    assert(drawn.includes(30), 'the page asked for was not drawn at all');
+    assert(viewer.frames.get(target.id).querySelector('canvas'), 'the page asked for has no picture on it');
+  } finally {
+    viewer.destroy();
+    host.remove();
+  }
+});
+
 test('a page is redrawn at the size it is shown at', async () => {
   /*
    * A bitmap drawn for one scale and shown at another is soft. The rule that
@@ -994,20 +1095,29 @@ test('a page is redrawn at the size it is shown at', async () => {
     await viewer.open(ws.pages[0]);
     await new Promise((resolve) => setTimeout(resolve, 400));
 
-    const settle = async () => new Promise((resolve) => setTimeout(resolve, 700));
     const sizes = () => {
       const frame = onStage(host);
       const canvas = frame.querySelector('canvas');
       const box = frame.getBoundingClientRect();
       return { drawn: canvas?.width ?? 0, shown: box.width };
     };
+    const matched = ({ drawn, shown }) => {
+      const ratio = drawn / (shown * (window.devicePixelRatio || 1));
+      return ratio > 0.9 && ratio < 1.1;
+    };
 
     for (const zoom of [1, 1.5, 1.25, 2]) {
       viewer.setZoom(zoom);
-      await settle();
+      /*
+       * Waited for rather than timed. The redraw follows a fifth of a second
+       * after the zooming stops, but it queues behind whatever was already being
+       * drawn — so a fixed pause here measures the machine, not the behaviour.
+       */
+      for (let i = 0; i < 40 && !matched(sizes()); i++) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
       const { drawn, shown } = sizes();
-      const ratio = drawn / (shown * (window.devicePixelRatio || 1));
-      assert(ratio > 0.9 && ratio < 1.1,
+      assert(matched({ drawn, shown }),
         `at ${zoom * 100}% the page is drawn ${drawn}px wide and shown ${Math.round(shown)}px wide`);
     }
   } finally {

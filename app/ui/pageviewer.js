@@ -19,6 +19,7 @@ import { pageSize } from '../core/workspace.js';
 import { cssFamilyFor } from '../core/fonts.js';
 import { appendOcrText, sortIntoReadingOrder } from './ocrlayer.js';
 import { AnnotationLayer } from './annotlayer.js';
+import { wireTextSelection } from './textselect.js';
 import { TextLayer } from '../../vendor/pdf.mjs';
 
 /**
@@ -144,6 +145,9 @@ export class PageViewer {
     clear(root).append(this.scroller, this.prevNav, this.nextNav);
 
     this.wireWheel();
+    // Dragging across a page selects the words dragged across, including from
+    // the empty space between them — see textselect.js.
+    this.unwireSelection = wireTextSelection(this.scroller);
     this.wireMiddleDrag();
     this.wireVisibility();
     this.wireScroll();
@@ -182,6 +186,7 @@ export class PageViewer {
     this.visibility?.disconnect();
     this.offCuts?.();
     clearTimeout(this.sharpenTimer);
+    this.unwireSelection?.();
   }
 
   // -------------------------------------------------------------- split cuts
@@ -891,6 +896,7 @@ export class PageViewer {
 
     const page = this.ws.pageById(id);
     if (!page) return;
+
     frame.dataset.painting = '1';
     delete frame.dataset.needsRedraw;
 
@@ -977,7 +983,17 @@ export class PageViewer {
     if (!page) return false;
     this.currentPageId = id;
     if (this.layout === 'continuous') {
-      this.scrollToPage(id);
+      this.scrollToPage(id, 'jump');
+      /*
+       * And drawn on arrival, rather than waiting to be noticed.
+       *
+       * Pages are drawn as they come into view, which the old smooth scroll saw
+       * to by dragging the window over every page on the way — the reason a jump
+       * to page 30 drew the twenty-nine before it. Arriving directly, nothing
+       * comes into view at all: the window is simply already there, and the page
+       * asked for would sit blank until something else disturbed it.
+       */
+      this.relayout();
       this.syncNav();
     } else {
       // Jumping by number lands somewhere else entirely as often as not, so the
@@ -990,9 +1006,23 @@ export class PageViewer {
     return true;
   }
 
+  /**
+   * @param {'smooth'|'auto'|'jump'} behavior 'jump' for a page asked for by
+   *   number, which is not a journey but an arrival.
+   *
+   * Smooth scrolling to page 30 drags the window across the twenty-nine pages in
+   * between, and every one of them comes into view on the way — so every one of
+   * them is drawn, and the page actually asked for arrives last, after all the
+   * work nobody wanted. Named rather than measured by distance: asking for a
+   * page by number means going there, however far it is.
+   */
   scrollToPage(id, behavior = 'smooth') {
     const frame = this.frames.get(id);
-    if (frame) this.scroller.scrollTo({ top: frame.offsetTop - PAGE_GAP, behavior });
+    if (!frame) return;
+    this.scroller.scrollTo({
+      top: frame.offsetTop - PAGE_GAP,
+      behavior: behavior === 'jump' ? 'auto' : behavior,
+    });
   }
 
   /**

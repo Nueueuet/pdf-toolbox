@@ -15,6 +15,7 @@ import { numberPrompt } from './modal.js';
 import { contextMenu } from './menu.js';
 import { ocrStatusOf, OCR_STATUS_LABEL } from '../tools/ocr.js';
 import { appendOcrText, sortIntoReadingOrder } from './ocrlayer.js';
+import { wireTextSelection } from './textselect.js';
 import { TextLayer } from '../../vendor/pdf.mjs';
 
 const THUMB_CONCURRENCY = 3;
@@ -42,6 +43,9 @@ export class PageGrid {
       if (event.target === root || event.target.classList.contains('grid__cards')) this.clearSelection();
     });
     ws.on('cuts', () => this.syncCutMarks());
+
+    // Copying text from a thumbnail selects the same way it does on a page.
+    this.unwireSelection = wireTextSelection(root);
 
     /*
      * A thumbnail's width comes from the grid's column sizing, so it is only
