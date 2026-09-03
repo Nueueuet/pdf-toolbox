@@ -1,3 +1,39 @@
+import { pageSize } from '../core/workspace.js';
+import { totalQuarter } from '../core/geometry.js';
+
+/**
+ * Turning about the top-left corner leaves the layer beside the page, so each
+ * turn is followed by the shift that brings it back over it.
+ */
+const TURNS = {
+  90: 'rotate(90deg) translateY(-100%)',
+  180: 'rotate(180deg) translate(-100%, -100%)',
+  270: 'rotate(270deg) translateX(-100%)',
+};
+
+/**
+ * How a page's text layer is laid out.
+ *
+ * pdf.js writes its text spans in the page's own, unturned coordinates whatever
+ * viewport it is handed. On a page carrying `/Rotate 270` — which is how a
+ * landscape sheet is usually made to read upright — the words therefore sit at
+ * right angles to the page as shown, and selecting does nothing over one part of
+ * it and something wild over another, the words not being where they look to be.
+ *
+ * So the layer is sized in the page's own terms and turned as a whole, which is
+ * what pdf.js's own viewer does with it.
+ *
+ * @param {object} page
+ * @returns {{width: number, height: number, turn: string}} size in points, and
+ *   the CSS that turns it
+ */
+export function textLayerBox(page) {
+  const { w, h } = pageSize(page);
+  const quarter = totalQuarter(page);
+  const turned = quarter % 180 === 90;
+  return { width: turned ? h : w, height: turned ? w : h, turn: TURNS[quarter] ?? '' };
+}
+
 /**
  * Puts recognised words into the same transparent text layer that carries a
  * page's real text.
@@ -82,29 +118,55 @@ export function sortIntoReadingOrder(container) {
 }
 
 /**
+ * A recognised word's place in the page's own, unturned coordinates.
+ *
+ * Recognition reads the page as it is shown, so its boxes are fractions of that.
+ * The text layer they join is laid out the way the page is written and turned as
+ * a whole — which is the only way pdf.js's own words can be put on a page that
+ * carries a rotation. So a word has to be turned back before it is placed.
+ *
+ * @param {{x: number, y: number, w: number, h: number}} word as shown
+ * @param {number} quarter 0, 90, 180 or 270
+ */
+export function unturnWord(word, quarter) {
+  if (quarter === 90) return { x: word.y, y: 1 - word.x - word.w, w: word.h, h: word.w };
+  if (quarter === 180) return { x: 1 - word.x - word.w, y: 1 - word.y - word.h, w: word.w, h: word.h };
+  if (quarter === 270) return { x: 1 - word.y - word.h, y: word.x, w: word.h, h: word.w };
+  return { x: word.x, y: word.y, w: word.w, h: word.h };
+}
+
+/**
  * @param {HTMLElement} container a `.textlayer` element, laid out in page points
  * @param {object} page
- * @param {number} displayWidth page width in points
- * @param {number} displayHeight page height in points
+ * @param {number} displayWidth page width in points, as shown
+ * @param {number} displayHeight page height in points, as shown
+ * @param {number} [quarter] how far the page is turned to be shown
  */
-export function appendOcrText(container, page, displayWidth, displayHeight) {
+export function appendOcrText(container, page, displayWidth, displayHeight, quarter = 0) {
   const words = page.ocr?.words ?? [];
   if (words.length === 0) return 0;
+
+  // The layer's own space: the page as written, which is the other way round
+  // from how it is shown when it is turned a quarter.
+  const turned = quarter % 180 === 90;
+  const layerWidth = turned ? displayHeight : displayWidth;
+  const layerHeight = turned ? displayWidth : displayHeight;
 
   const placed = [];
   for (const word of words) {
     if (!word.text?.trim()) continue;
+    const at = unturnWord(word, quarter);
 
     const span = document.createElement('span');
     span.className = 'ocrword';
     span.textContent = word.text;
-    span.style.left = `${word.x * displayWidth}px`;
-    span.style.top = `${word.y * displayHeight}px`;
+    span.style.left = `${at.x * layerWidth}px`;
+    span.style.top = `${at.y * layerHeight}px`;
     // Font size follows the recognised box height, so a selection highlight
     // covers the ink rather than floating above or below it.
-    span.style.fontSize = `${Math.max(1, word.h * displayHeight)}px`;
+    span.style.fontSize = `${Math.max(1, at.h * layerHeight)}px`;
     container.appendChild(span);
-    placed.push([span, word.w * displayWidth]);
+    placed.push([span, at.w * layerWidth]);
   }
 
   /*

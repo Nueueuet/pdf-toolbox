@@ -17,7 +17,7 @@ import { renderPageCanvas, viewportFor } from '../core/render.js';
 import { makeMapper, totalQuarter } from '../core/geometry.js';
 import { pageSize } from '../core/workspace.js';
 import { cssFamilyFor } from '../core/fonts.js';
-import { appendOcrText, sortIntoReadingOrder } from './ocrlayer.js';
+import { appendOcrText, sortIntoReadingOrder, textLayerBox } from './ocrlayer.js';
 import { AnnotationLayer } from './annotlayer.js';
 import { wireTextSelection } from './textselect.js';
 import { TextLayer } from '../../vendor/pdf.mjs';
@@ -44,6 +44,13 @@ const PAINT_MARGIN = 400;
 const PREFETCH_REACH = 2;
 
 /**
+ * A page that took longer than this to draw is treated as a slow one: drawn in
+ * advance no longer pays, and redrawing it for a small change in sharpness costs
+ * more than the sharpness is worth.
+ */
+const SLOW_DRAW = 1200;
+
+/**
  * A wheel's delta in pixels, whatever unit it arrived in.
  *
  * `deltaX` and `deltaY` are only pixels when `deltaMode` says so. A trackpad
@@ -60,6 +67,21 @@ function wheelPixels(value, mode, extent) {
   if (mode === 1) return value * 16;
   if (mode === 2) return value * extent;
   return value;
+}
+
+/**
+ * Lays a page's text over the picture of it, turned the same way.
+ *
+ * @param {HTMLElement} el the `.textlayer`
+ * @param {object} page
+ * @param {number} scale
+ */
+function layoutTextLayer(el, page, scale) {
+  if (!el || !page) return;
+  const box = textLayerBox(page);
+  el.style.width = `${box.width}px`;
+  el.style.height = `${box.height}px`;
+  el.style.transform = `scale(${scale}) ${box.turn}`.trim();
 }
 
 /** The same scissors the grid puts in its gutters, for the same job. */
@@ -131,6 +153,7 @@ export class PageViewer {
     this.renderToken = 0;
     this.frames = new Map(); // page id -> frame element
     this.layers = new Map(); // page id -> its editing layer
+    this.drawCost = new Map(); // page id -> how long its last drawing took, in ms
     this.editMode = 'select';
 
     this.scroller = h('div.viewer__scroll');
@@ -494,6 +517,12 @@ export class PageViewer {
    */
   prefetch() {
     if (this.layout !== 'single') return;
+    /*
+     * Not for slow pages. Drawing the four neighbours of a page that takes six
+     * seconds apiece is half a minute of work for pages nobody has asked for,
+     * and it holds up the one in front of the reader.
+     */
+    if (this.isSlow(this.currentPageId)) return;
     for (const [id, frame] of this.frames) {
       if (id !== this.currentPageId) this.paint(frame, id);
     }
@@ -793,18 +822,20 @@ export class PageViewer {
 
       // Text, inspection and editing are all laid out in page points and scaled
       // as one, so a text box and the word under it never drift apart.
-      for (const selector of ['.textlayer', '.inspectlayer', '.viewer__overlay']) {
+      for (const selector of ['.inspectlayer', '.viewer__overlay']) {
         const el = frame.querySelector(selector);
         el.style.width = `${w}px`;
         el.style.height = `${ph}px`;
         el.style.transform = `scale(${scale})`;
       }
+      layoutTextLayer(frame.querySelector('.textlayer'), this.ws.pageById(id), scale);
 
       // A page whose bitmap was drawn for a very different scale is redrawn at
       // once, so a big jump in zoom does not show a blown-up picture even for a
       // moment. Smaller differences are left to the sharpening pass below.
       const drawn = Number(frame.dataset.drawnScale || 0);
-      if (drawn && (scale / drawn > 1.5 || drawn / scale > 2.5)) frame.dataset.needsRedraw = '1';
+      const [up, down] = this.isSlow(id) ? [3, 4] : [1.5, 2.5];
+      if (drawn && (scale / drawn > up || drawn / scale > down)) frame.dataset.needsRedraw = '1';
 
       if (!offstage) placed.push({ id, frame, height: pageHeight });
     }
@@ -849,6 +880,12 @@ export class PageViewer {
       const drawn = Number(frame.dataset.drawnScale || 0);
       // A hair either way is not worth redrawing for; anything more shows.
       if (!drawn || Math.abs(drawn - scale) / scale < 0.02) continue;
+      /*
+       * A slow page is left as it is until it is properly wrong. Six seconds of
+       * drawing to sharpen a plan that was already legible is a bad bargain, and
+       * paid on every notch of the wheel it is an unusable one.
+       */
+      if (this.isSlow(id) && scale / drawn < 2 && drawn / scale < 2) continue;
       // Pages out of view are left alone — they are redrawn when they come into
       // view — but the ones standing by in single layout are the next page and
       // are wanted sharp before they are turned to.
@@ -899,8 +936,11 @@ export class PageViewer {
 
     frame.dataset.painting = '1';
     delete frame.dataset.needsRedraw;
+    // A page that takes seconds should look like work, not like a hung window.
+    frame.classList.add('is-drawing');
 
     const token = this.renderToken;
+    const started = performance.now();
     try {
       const scale = this.effectiveZoom();
       const pixelScale = Math.min(4, scale * (window.devicePixelRatio || 1));
@@ -920,14 +960,31 @@ export class PageViewer {
       canvas.className = 'viewer__bitmap';
       clear(frame.querySelector('.viewer__canvas')).appendChild(canvas);
       frame.dataset.drawnScale = String(scale);
+      /*
+       * How long this page takes to draw, remembered.
+       *
+       * A large plan is slow for a reason that has nothing to do with how big it
+       * is shown: measured on an A0 sheet of drawings, a fifth of a megapixel
+       * took as long as ten — six seconds either way, spent working through tens
+       * of thousands of drawing instructions rather than filling pixels. So the
+       * only thing that helps such a page is to draw it less often, and knowing
+       * which pages those are is what makes that possible.
+       */
+      this.drawCost.set(id, performance.now() - started);
 
       await this.buildTextLayer(frame, page, token);
     } catch (err) {
       if (err?.name !== 'RenderingCancelledException') console.error('viewer paint failed', err);
     } finally {
       delete frame.dataset.painting;
+      frame.classList.remove('is-drawing');
       if (frame.dataset.needsRedraw === '1' && frame.isConnected) this.paint(frame, id);
     }
+  }
+
+  /** True for a page that takes long enough to draw that drawing it shows. */
+  isSlow(id) {
+    return (this.drawCost.get(id) ?? 0) > SLOW_DRAW;
   }
 
   /** Selectable text over the page — a viewer that cannot copy is half a viewer. */
@@ -953,7 +1010,7 @@ export class PageViewer {
         viewport: pdfPage.getViewport({ scale: 1, rotation: totalQuarter(page) }),
       }).render();
     }
-    if (hasOcr) appendOcrText(layer, page, mapper.displayWidth, mapper.displayHeight);
+    if (hasOcr) appendOcrText(layer, page, mapper.displayWidth, mapper.displayHeight, totalQuarter(page));
     // Last, so recognised words take their place among the rest rather than
     // being tacked on after everything.
     sortIntoReadingOrder(layer);

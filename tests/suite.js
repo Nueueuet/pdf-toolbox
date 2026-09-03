@@ -975,6 +975,125 @@ test('printing hands the document to the browser, not the window', async () => {
   assert(bare.length !== bytes.length, 'leaving the annotations out changed nothing');
 });
 
+test('the text of a turned page lies over the page', async () => {
+  /*
+   * A landscape sheet is usually made to read upright by carrying `/Rotate 270`,
+   * and pdf.js writes its text spans in the page's own, unturned coordinates
+   * whatever viewport it is handed. Laid over the picture untouched, every word
+   * ends up at right angles to where it appears: selecting did nothing over one
+   * part of the page and something wild over another, the words not being where
+   * they looked to be.
+   */
+  const doc = await PDFDocument.create();
+  const sheet = doc.addPage([842, 595]);
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  /*
+   * Written up the sheet so that it reads across once the sheet is turned —
+   * which is how the letter this came from is made: a landscape media box, the
+   * text laid at right angles to it, and `/Rotate 270` to stand it upright.
+   */
+  sheet.drawText('Landscape sheet, read upright', { x: 300, y: 60, size: 14, font, rotate: degrees(90) });
+  sheet.setRotation(degrees(270));
+  const bytes = await doc.save();
+
+  const ws = new Workspace();
+  await ws.addFiles([new File([bytes], 'turned.pdf', { type: 'application/pdf' })]);
+  const page = ws.pages[0];
+  assert(page.base.rotate === 270, `the sample page should carry a rotation, has ${page.base.rotate}`);
+
+  const host = document.createElement('div');
+  host.className = 'viewer';
+  host.style.cssText = 'position:fixed;left:0;top:0;width:800px;height:600px;opacity:0;z-index:9999';
+  document.body.appendChild(host);
+
+  const viewer = new PageViewer(host, ws, {});
+  try {
+    await viewer.open(page);
+    viewer.setZoom(1);
+    await new Promise((resolve) => setTimeout(resolve, 900));
+
+    const frame = onStage(host);
+    const shown = frame.getBoundingClientRect();
+    assert(shown.height > shown.width, 'a page turned a quarter should be shown upright');
+
+    const spans = [...frame.querySelectorAll('.textlayer span')].filter((s) => s.textContent.trim());
+    assert(spans.length > 0, 'the page has no text layer at all');
+    for (const span of spans) {
+      const box = span.getBoundingClientRect();
+      assert(box.left >= shown.left - 2 && box.right <= shown.right + 2
+        && box.top >= shown.top - 2 && box.bottom <= shown.bottom + 2,
+        `"${span.textContent.slice(0, 20)}" sits off the page`);
+      // Turned with the page, the words read across it rather than down it.
+      assert(box.width > box.height, `"${span.textContent.slice(0, 20)}" is standing on end`);
+    }
+  } finally {
+    viewer.destroy();
+    host.remove();
+  }
+});
+
+test('a slow page is not redrawn for every notch of the wheel', async () => {
+  /*
+   * A large plan takes seconds to draw, and for a reason that has nothing to do
+   * with how big it is shown: measured on an A0 sheet of drawings, a fifth of a
+   * megapixel took as long as ten, the time going on tens of thousands of
+   * drawing instructions rather than on pixels. Sharpening such a page after
+   * every zoom step costs six seconds a step and gains almost nothing.
+   */
+  const ws = await loadWorkspace(['report.pdf']);
+  const host = document.createElement('div');
+  host.className = 'viewer';
+  host.style.cssText = 'position:fixed;left:0;top:0;width:800px;height:600px;opacity:0;z-index:9999';
+  document.body.appendChild(host);
+
+  const viewer = new PageViewer(host, ws, {});
+  try {
+    await viewer.open(ws.pages[0]);
+    viewer.setZoom(1);
+    await new Promise((resolve) => setTimeout(resolve, 700));
+
+    const page = ws.pages[0];
+    const frame = viewer.frames.get(page.id);
+    assert(!viewer.isSlow(page.id), 'an ordinary page should not count as slow');
+
+    // Told it took seven seconds last time, as the plan did.
+    viewer.drawCost.set(page.id, 7000);
+    assert(viewer.isSlow(page.id), 'a page that took seven seconds should count as slow');
+
+    /*
+     * The rule is checked directly rather than through the timer: a real drawing
+     * finishing mid-test would put its own measured cost back over the one set
+     * here, and the test would then be measuring this machine's speed.
+     */
+    // Only this page counts: the pages waiting their turn beside it are
+    // ordinary ones, and they are sharpened as usual.
+    let asked = 0;
+    const real = viewer.paint.bind(viewer);
+    viewer.paint = (f, id) => { if (id === page.id) asked += 1; };
+
+    frame.dataset.drawnScale = '1';
+    viewer.zoom = 1.25;
+    viewer.sharpen();
+    assert(asked === 0, 'a slow page was redrawn for a quarter more zoom');
+
+    // Far enough out and it is drawn again, because by then it really is wrong.
+    viewer.zoom = 4;
+    viewer.sharpen();
+    assert(asked === 1, `a slow page four times too coarse should be redrawn, asked ${asked} times`);
+
+    // An ordinary page is sharpened at the first difference worth seeing.
+    viewer.drawCost.set(page.id, 30);
+    frame.dataset.drawnScale = '1';
+    viewer.zoom = 1.25;
+    viewer.sharpen();
+    assert(asked === 2, 'an ordinary page should be sharpened for a quarter more zoom');
+    viewer.paint = real;
+  } finally {
+    viewer.destroy();
+    host.remove();
+  }
+});
+
 test('a press between the words finds the nearest word', async () => {
   /*
    * Most of a page is the space between the words. A press there gave the

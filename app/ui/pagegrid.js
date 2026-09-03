@@ -14,7 +14,7 @@ import { makeMapper, totalQuarter } from '../core/geometry.js';
 import { numberPrompt } from './modal.js';
 import { contextMenu } from './menu.js';
 import { ocrStatusOf, OCR_STATUS_LABEL } from '../tools/ocr.js';
-import { appendOcrText, sortIntoReadingOrder } from './ocrlayer.js';
+import { appendOcrText, sortIntoReadingOrder, textLayerBox } from './ocrlayer.js';
 import { wireTextSelection } from './textselect.js';
 import { TextLayer } from '../../vendor/pdf.mjs';
 
@@ -76,7 +76,8 @@ export class PageGrid {
     const scale = width / winW;
     const x = Number(shell.dataset.winX) || 0;
     const y = Number(shell.dataset.winY) || 0;
-    layer.style.transform = `translate(${-x * scale}px, ${-y * scale}px) scale(${scale})`;
+    const turn = layer.dataset.turn ?? '';
+    layer.style.transform = `translate(${-x * scale}px, ${-y * scale}px) scale(${scale}) ${turn}`.trim();
   }
 
   setZoom(zoom) {
@@ -699,8 +700,10 @@ PageGrid.prototype.addThumbTextLayer = async function addThumbTextLayer(page, sh
 
   const layer = h('div.textlayer');
   layer.style.setProperty('--scale-factor', '1');
-  layer.style.width = `${mapper.displayWidth}px`;
-  layer.style.height = `${mapper.displayHeight}px`;
+  // In the page's own terms, and turned as a whole — see textLayerBox.
+  const box = textLayerBox(page);
+  layer.style.width = `${box.width}px`;
+  layer.style.height = `${box.height}px`;
 
   if (hasPdfText) {
     const pdfPage = await source.doc.getPage(page.srcIndex + 1);
@@ -711,12 +714,13 @@ PageGrid.prototype.addThumbTextLayer = async function addThumbTextLayer(page, sh
       viewport: textViewport,
     }).render();
   }
-  if (hasOcr) appendOcrText(layer, page, mapper.displayWidth, mapper.displayHeight);
+  if (hasOcr) appendOcrText(layer, page, mapper.displayWidth, mapper.displayHeight, totalQuarter(page));
   // What a drag across the page picks up follows the order these are in, and a
   // PDF stores its words in the order they were drawn rather than read.
   sortIntoReadingOrder(layer);
   if (!shell.isConnected) return;
 
+  layer.dataset.turn = box.turn;
   Object.assign(shell.dataset, {
     winW: String(mapper.outWidth),
     winX: String(mapper.window.x),

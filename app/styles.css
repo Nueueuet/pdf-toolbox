@@ -892,6 +892,37 @@ button { font: inherit; }
 }
 
 /*
+ * A page being drawn.
+ *
+ * A large plan takes seconds — spent working through the drawing itself, not
+ * filling pixels, so no amount of zooming out makes it quicker. Saying so is the
+ * difference between a wait and a window that appears to have died.
+ */
+.viewer__page.is-drawing::after {
+  content: "";
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--line);
+  border-top-color: var(--blue);
+  border-radius: 50%;
+  animation: pagespin .7s linear infinite;
+  /* Only worth showing for a page that is genuinely slow to draw. */
+  animation-delay: 0s;
+  opacity: 0;
+  animation-name: pagespin, pageshow;
+  animation-duration: .7s, .01s;
+  animation-delay: 0s, .6s;
+  animation-fill-mode: none, forwards;
+  animation-iteration-count: infinite, 1;
+}
+
+@keyframes pagespin { to { transform: rotate(360deg); } }
+@keyframes pageshow { to { opacity: 1; } }
+
+/*
  * A page drawn in advance, waiting its turn.
  *
  * Hidden rather than absent: it is a real frame with a real canvas, drawn at the

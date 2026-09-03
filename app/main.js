@@ -929,17 +929,23 @@ class App {
 
   showGrid() {
     const tool = TOOLS.find((t) => t.id === this.activeToolId);
-    // Leaving a single-page surface means leaving the tool that needed it.
-    if (tool?.mode === 'viewer') {
-      this.selectTool('merge');
-      return;
-    }
     this.surface = 'grid';
     this.el.grid.hidden = false;
     this.el.viewer.hidden = true;
     this.el.wsbar.hidden = false;
     this.el.viewerbar.hidden = true;
     this.grid.render();
+
+    /*
+     * Leaving a page means leaving a tool that only works on one — writing and
+     * cropping are done with the pointer on the page itself, and there is
+     * nothing to point at in a grid of thumbnails.
+     *
+     * After the move, not instead of it. Changing the tool and stopping there
+     * left the reader still on the page, so "All pages" had to be pressed twice:
+     * once to put the tool down, once to actually go.
+     */
+    if (tool?.mode === 'viewer') this.selectTool('merge');
   }
 
   showViewer() {
