@@ -20,16 +20,17 @@ import { progressToast, toast } from '../ui/toast.js';
  */
 function pageScope(ctx, { label = 'Pages' } = {}) {
   /*
-   * Looking at a single page makes that page the obvious default — but only the
-   * default. The field still takes `all` or any range, so a tool opened from the
-   * single-page view can still act on the whole document.
+   * The whole document unless pages were picked out by hand.
+   *
+   * Reading one page used to make that page the default, which read as the tool
+   * offering to work on the whole document and then quietly not doing it — the
+   * field said "1" and a document of nine pages came out as one. Pages chosen in
+   * the overview are a deliberate act and still stand; being on a page is not.
    */
-  const current = ctx.app.onSinglePage ? ctx.currentPage() : null;
-  const initial = ctx.ws.selection.size
+  const picked = ctx.ws.selection.size && !ctx.app.onSinglePage;
+  const initial = picked
     ? formatRange([...ctx.ws.selection].map((id) => ctx.ws.indexOf(id) + 1))
-    : current
-      ? String(ctx.ws.indexOf(current.id) + 1)
-      : 'all';
+    : 'all';
   const control = rangeField({ value: initial });
 
   const resolve = () => {

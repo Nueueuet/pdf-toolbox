@@ -50,6 +50,19 @@ const PREFETCH_REACH = 2;
  */
 const SLOW_DRAW = 1200;
 
+/** Bigger than four A4s and it is a sheet — a plan, a drawing, a poster. */
+const BIG_SHEET = 4 * 595 * 842;
+
+/**
+ * The most pixels any one page is drawn into.
+ *
+ * An A0 sheet at twice its own size is 43 megapixels and 170 megabytes of
+ * canvas, which is not a picture of a page so much as a way of running out of
+ * memory. Past this the page is drawn at the best size that fits and shown
+ * larger, which is soft but immediate.
+ */
+const PIXEL_BUDGET = 16e6;
+
 /**
  * A wheel's delta in pixels, whatever unit it arrived in.
  *
@@ -82,6 +95,38 @@ function layoutTextLayer(el, page, scale) {
   el.style.width = `${box.width}px`;
   el.style.height = `${box.height}px`;
   el.style.transform = `scale(${scale}) ${box.turn}`.trim();
+}
+
+/** True for a page that is a sheet rather than a page: a plan, a poster. */
+function isBigSheet(page) {
+  if (!page) return false;
+  const { w, h } = pageSize(page);
+  return w * h > BIG_SHEET;
+}
+
+/**
+ * How large to draw a page, which is not always how large it is shown.
+ *
+ * Drawing a large sheet is slow for a reason that has nothing to do with its
+ * size on screen: measured on an A0 plan, a fifth of a megapixel took as long as
+ * ten, and a 900 by 700 corner of it took as long as the whole thing — six and a
+ * half seconds every time, spent working through the drawing rather than filling
+ * pixels. Drawing only the visible part would therefore save nothing, and
+ * drawing it again at every zoom costs everything.
+ *
+ * So a sheet is drawn once at its own full size, however small it is being shown
+ * at the time, and zooming in up to that size then costs nothing at all. The
+ * budget is what keeps that from turning into hundreds of megabytes.
+ *
+ * @param {object} page
+ * @param {number} zoom the scale it is shown at
+ */
+function drawingScale(page, zoom) {
+  const dpr = window.devicePixelRatio || 1;
+  const { w, h } = pageSize(page);
+  const wanted = (isBigSheet(page) ? Math.max(zoom, 1) : zoom) * dpr;
+  const budget = Math.sqrt(PIXEL_BUDGET / Math.max(1, w * h));
+  return Math.max(0.05, Math.min(wanted, budget, 4));
 }
 
 /** The same scissors the grid puts in its gutters, for the same job. */
@@ -154,6 +199,7 @@ export class PageViewer {
     this.frames = new Map(); // page id -> frame element
     this.layers = new Map(); // page id -> its editing layer
     this.drawCost = new Map(); // page id -> how long its last drawing took, in ms
+    this.drawing = new Set(); // page ids being drawn right now
     this.editMode = 'select';
 
     this.scroller = h('div.viewer__scroll');
@@ -209,6 +255,7 @@ export class PageViewer {
     this.visibility?.disconnect();
     this.offCuts?.();
     clearTimeout(this.sharpenTimer);
+    clearTimeout(this.busyTimer);
     this.unwireSelection?.();
   }
 
@@ -834,7 +881,10 @@ export class PageViewer {
       // once, so a big jump in zoom does not show a blown-up picture even for a
       // moment. Smaller differences are left to the sharpening pass below.
       const drawn = Number(frame.dataset.drawnScale || 0);
-      const [up, down] = this.isSlow(id) ? [3, 4] : [1.5, 2.5];
+      const sheet = this.isSlow(id) || isBigSheet(this.ws.pageById(id));
+      // Never redrawn merely for being finer than it is shown — a sheet is
+      // drawn that way on purpose.
+      const [up, down] = sheet ? [3, Infinity] : [1.5, 2.5];
       if (drawn && (scale / drawn > up || drawn / scale > down)) frame.dataset.needsRedraw = '1';
 
       if (!offstage) placed.push({ id, frame, height: pageHeight });
@@ -878,14 +928,20 @@ export class PageViewer {
     const scale = this.effectiveZoom();
     for (const [id, frame] of this.frames) {
       const drawn = Number(frame.dataset.drawnScale || 0);
-      // A hair either way is not worth redrawing for; anything more shows.
-      if (!drawn || Math.abs(drawn - scale) / scale < 0.02) continue;
+      const page = this.ws.pageById(id);
+      if (!drawn || !page) continue;
+      /*
+       * Only ever redrawn for being too coarse, never for being too fine. A
+       * sheet is deliberately drawn larger than it is shown, and a bitmap shown
+       * smaller than it was drawn is not a problem — it is the whole trick.
+       */
+      if (drawn >= scale * 0.98) continue;
       /*
        * A slow page is left as it is until it is properly wrong. Six seconds of
        * drawing to sharpen a plan that was already legible is a bad bargain, and
        * paid on every notch of the wheel it is an unusable one.
        */
-      if (this.isSlow(id) && scale / drawn < 2 && drawn / scale < 2) continue;
+      if ((this.isSlow(id) || isBigSheet(page)) && scale / drawn < 2) continue;
       // Pages out of view are left alone — they are redrawn when they come into
       // view — but the ones standing by in single layout are the next page and
       // are wanted sharp before they are turned to.
@@ -937,13 +993,14 @@ export class PageViewer {
     frame.dataset.painting = '1';
     delete frame.dataset.needsRedraw;
     // A page that takes seconds should look like work, not like a hung window.
-    frame.classList.add('is-drawing');
+    this.drawing.add(id);
+    this.syncBusy();
 
     const token = this.renderToken;
     const started = performance.now();
     try {
       const scale = this.effectiveZoom();
-      const pixelScale = Math.min(4, scale * (window.devicePixelRatio || 1));
+      const pixelScale = drawingScale(page, scale);
       /*
        * Without annotations: every one of them is a live box in the editing
        * layer above, and drawing them here as well put a second, frozen copy of
@@ -959,7 +1016,9 @@ export class PageViewer {
 
       canvas.className = 'viewer__bitmap';
       clear(frame.querySelector('.viewer__canvas')).appendChild(canvas);
-      frame.dataset.drawnScale = String(scale);
+      // What the bitmap is good for, rather than what was asked for: a sheet is
+      // drawn larger than it is shown so that zooming in needs no second one.
+      frame.dataset.drawnScale = String(pixelScale / (window.devicePixelRatio || 1));
       /*
        * How long this page takes to draw, remembered.
        *
@@ -977,9 +1036,28 @@ export class PageViewer {
       if (err?.name !== 'RenderingCancelledException') console.error('viewer paint failed', err);
     } finally {
       delete frame.dataset.painting;
-      frame.classList.remove('is-drawing');
+      this.drawing.delete(id);
+      this.syncBusy();
       if (frame.dataset.needsRedraw === '1' && frame.isConnected) this.paint(frame, id);
     }
+  }
+
+  /**
+   * Says whether anything is being drawn, for the sign in the bar.
+   *
+   * Only worth saying for a page that takes long enough to notice: an ordinary
+   * page is drawn in a few hundredths of a second, and a sign that flickers on
+   * and off at every turn is worse than none.
+   */
+  syncBusy() {
+    const slow = [...this.drawing].some((id) => this.isSlow(id) || this.drawCost.get(id) === undefined);
+    clearTimeout(this.busyTimer);
+    if (!this.drawing.size || !slow) {
+      this.handlers.onBusy?.(false);
+      return;
+    }
+    // Held back a moment, so a page that turns out to be quick says nothing.
+    this.busyTimer = setTimeout(() => this.handlers.onBusy?.(this.drawing.size > 0), 400);
   }
 
   /** True for a page that takes long enough to draw that drawing it shows. */

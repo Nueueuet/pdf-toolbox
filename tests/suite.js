@@ -1032,6 +1032,63 @@ test('the text of a turned page lies over the page', async () => {
   }
 });
 
+test('a large sheet is drawn once and zoomed into for nothing', async () => {
+  /*
+   * Drawing a large sheet is slow for a reason that has nothing to do with its
+   * size on screen. Measured on an A0 plan: a fifth of a megapixel took as long
+   * as ten, and a 900 by 700 corner of it took as long as the whole page — six
+   * and a half seconds every time. Drawing only the part in view would save
+   * nothing, and a second drawing costs as much as the first.
+   *
+   * So a sheet is drawn once at its own full size, however small it is shown,
+   * and zooming in as far as that costs nothing at all.
+   */
+  const doc = await PDFDocument.create();
+  // A0, near enough: twenty times the area of an A4 page.
+  const sheet = doc.addPage([2384, 3370]);
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  sheet.drawText('Site plan', { x: 200, y: 3000, size: 48, font });
+  const bytes = await doc.save();
+
+  const ws = new Workspace();
+  await ws.addFiles([new File([bytes], 'plan.pdf', { type: 'application/pdf' })]);
+  const page = ws.pages[0];
+
+  const host = document.createElement('div');
+  host.className = 'viewer';
+  host.style.cssText = 'position:fixed;left:0;top:0;width:800px;height:600px;opacity:0;z-index:9999';
+  document.body.appendChild(host);
+
+  const viewer = new PageViewer(host, ws, {});
+  try {
+    await viewer.open(page);
+    // Fit puts a sheet this size at about a sixth of its own size.
+    viewer.setZoom(null);
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+
+    const frame = viewer.frames.get(page.id);
+    const canvas = () => frame.querySelector('canvas');
+    assert(canvas(), 'the sheet was never drawn');
+    const first = canvas();
+    assert(first.width >= 2300, `a sheet shown small was drawn only ${first.width}px wide`);
+    assert(viewer.effectiveZoom() < 0.5, 'the sheet should be shown well under its own size');
+
+    // Everything up to its own size is then free.
+    for (const zoom of [0.5, 0.75, 1]) {
+      viewer.setZoom(zoom);
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      assert(canvas() === first, `zooming to ${zoom * 100}% drew the sheet again`);
+    }
+
+    // And no bitmap runs away with the memory.
+    assert(first.width * first.height <= 17e6,
+      `the sheet was drawn into ${(first.width * first.height / 1e6).toFixed(1)} megapixels`);
+  } finally {
+    viewer.destroy();
+    host.remove();
+  }
+});
+
 test('a slow page is not redrawn for every notch of the wheel', async () => {
   /*
    * A large plan takes seconds to draw, and for a reason that has nothing to do
@@ -1220,10 +1277,13 @@ test('a page is redrawn at the size it is shown at', async () => {
       const box = frame.getBoundingClientRect();
       return { drawn: canvas?.width ?? 0, shown: box.width };
     };
-    const matched = ({ drawn, shown }) => {
-      const ratio = drawn / (shown * (window.devicePixelRatio || 1));
-      return ratio > 0.9 && ratio < 1.1;
-    };
+    /*
+     * Never coarser than the page is shown — which is the thing that reads as
+     * blurry. Finer is allowed and sometimes deliberate: a large sheet is drawn
+     * at its own size however small it is being shown, because drawing it again
+     * costs seconds.
+     */
+    const matched = ({ drawn, shown }) => drawn >= shown * (window.devicePixelRatio || 1) * 0.9;
 
     for (const zoom of [1, 1.5, 1.25, 2]) {
       viewer.setZoom(zoom);
@@ -1238,6 +1298,8 @@ test('a page is redrawn at the size it is shown at', async () => {
       const { drawn, shown } = sizes();
       assert(matched({ drawn, shown }),
         `at ${zoom * 100}% the page is drawn ${drawn}px wide and shown ${Math.round(shown)}px wide`);
+      assert(drawn <= shown * (window.devicePixelRatio || 1) * 4 + 1,
+        `at ${zoom * 100}% an ordinary page is drawn ${drawn}px wide for ${Math.round(shown)}px of screen`);
     }
   } finally {
     viewer.destroy();

@@ -136,6 +136,15 @@
             </div>
 
             <div class="viewerbar__side viewerbar__side--end">
+              <!--
+                Drawing a large plan takes seconds, and the page it is drawing
+                may be scrolled off in any direction — so the sign that it is
+                working belongs in the bar, which is always in front of you.
+              -->
+              <span class="drawing" id="viewerDrawing" hidden aria-live="polite">
+                <span class="drawing__spin" aria-hidden="true"></span>
+                <span class="drawing__word">Drawing…</span>
+              </span>
               <button class="btn btn--icon" id="viewerZoomOut" aria-label="Zoom out" title="Zoom out (minus key)">−</button>
               <span class="wsbar__zoomvalue" id="viewerZoom">100%</span>
               <button class="btn btn--icon" id="viewerZoomIn" aria-label="Zoom in" title="Zoom in (plus key)">+</button>

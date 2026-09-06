@@ -59,6 +59,7 @@ class App {
       dropveil: $('#dropveil'),
       selectionStatus: $('#selectionStatus'),
       zoomValue: $('#zoomValue'),
+      drawing: $('#viewerDrawing'),
       undo: $('#undoBtn'),
       redo: $('#redoBtn'),
     };
@@ -72,6 +73,9 @@ class App {
         this.currentPageId = page?.id ?? this.currentPageId;
         this.syncViewerLabel();
       },
+      // Whether anything is being drawn right now, shown in the bar where it
+      // stays in front of the reader however far into a page they have moved.
+      onBusy: (busy) => { this.el.drawing.hidden = !busy; },
       onZoomChange: (zoom, isFit) => {
         $('#viewerZoom').textContent = `${Math.round(zoom * 100)}%`;
         this.onViewerZoom?.(zoom, isFit);
@@ -794,6 +798,8 @@ class App {
    */
   syncDocName() {
     if (document.activeElement !== this.el.docTitle) this.el.docTitle.value = this.ws.name;
+    // Readable in full even where the bar is too narrow to show it in full.
+    this.el.docTitle.title = this.ws.name;
     // The tab is how you find this window again among twenty others, so it says
     // which document is in it rather than repeating the name of the app.
     document.title = this.ws.pageCount ? `${this.ws.name} — PDF Toolbox` : 'PDF Toolbox';
@@ -950,6 +956,9 @@ class App {
 
   showViewer() {
     this.surface = 'viewer';
+    // The bar has only now appeared, so it may have missed being told that a
+    // page is already being drawn.
+    queueMicrotask(() => this.viewer.syncBusy?.());
     this.el.grid.hidden = true;
     this.el.viewer.hidden = false;
     this.el.wsbar.hidden = true;
