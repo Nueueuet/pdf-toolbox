@@ -26,7 +26,7 @@ const SHELL_KEY = 'shell';
 /** How wide the options panel was dragged to. */
 const PANEL_KEY = 'panel-width';
 import { IN_EXTENSION } from './core/paths.js';
-import { makeAnnot } from './core/annots.js';
+import { makeAnnot, makeInk } from './core/annots.js';
 import { PDFDocument } from '../vendor/pdf-lib.esm.js';
 
 class App {
@@ -86,6 +86,9 @@ class App {
         for (const listener of this.annotListeners) listener(annot);
       },
       onDeleteAnnot: (annot) => this.deleteAnnot(annot),
+      // A stroke of the pen: one movement, one entry in the history.
+      onInk: (points, style) => this.addInk(points, style),
+      onEraseInk: (id) => this.eraseInk(id),
       // One undo step per editing session, not one per keystroke.
       onCommitText: (annot, after) => {
         this.ws.commit('Edit text', () => {
@@ -909,6 +912,35 @@ class App {
     this.thumbTimer = setTimeout(() => {
       if (this.mode === 'grid') this.grid.render();
     }, 350);
+  }
+
+  /**
+   * Puts a stroke of the pen on the page in front of the reader.
+   *
+   * A stroke that goes nowhere is a stray click rather than a mark, and leaving
+   * those on the page would litter it with dots nobody meant to make.
+   */
+  addInk(points, style) {
+    const page = this.currentPage();
+    if (!page || !points?.length) return;
+
+    const annot = makeInk(points, style);
+    if (annot.points.length < 2 && annot.w < 0.002 && annot.h < 0.002) return;
+    this.ws.commit('Draw', () => page.annots.push(annot));
+    this.surfaceEditor.drawOverlay();
+    this.scheduleThumbRefresh();
+  }
+
+  /** Takes a whole stroke off the page again. */
+  eraseInk(id) {
+    const page = this.currentPage();
+    const annot = page?.annots.find((a) => a.id === id);
+    if (!annot) return;
+    this.ws.commit('Rub out', () => {
+      page.annots = page.annots.filter((a) => a.id !== id);
+    });
+    this.surfaceEditor.drawOverlay();
+    this.scheduleThumbRefresh();
   }
 
   /** Removes a text box or stamp from the page it sits on. */

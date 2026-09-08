@@ -8,7 +8,7 @@
  *           be expressed in the original page objects — free-angle rotation,
  *           background replacement, compression, upscaling, images.
  */
-import { PDFDocument, StandardFonts, PDFName, degrees, rgb } from '../../vendor/pdf-lib.esm.js';
+import { PDFDocument, StandardFonts, PDFName, degrees, rgb, LineCapStyle } from '../../vendor/pdf-lib.esm.js';
 import { makeMapper, totalQuarter } from './geometry.js';
 import { renderPageCanvas, viewportFor } from './render.js';
 import { layoutAnnot, anchorOf } from './annots.js';
@@ -185,6 +185,10 @@ async function addRasterPage(out, ws, page, { rasterDpi, rasterMime, jpegQuality
 }
 
 async function drawAnnotOnPage(pdfPage, annot, mapper, embedFont) {
+  if (annot.role === 'ink') {
+    drawInkOnPage(pdfPage, annot, mapper);
+    return;
+  }
   // Layout happens in full-page display space — see the note in render.js.
   const layout = layoutAnnot(annot, mapper.displayWidth, mapper.displayHeight);
   const font = await embedFont(annot.family, annot.bold, annot.italic);
@@ -238,6 +242,38 @@ async function drawAnnotOnPage(pdfPage, annot, mapper, embedFont) {
       rotate: degrees(drawRotate),
       opacity,
     });
+  }
+}
+
+/**
+ * A pen stroke, as a run of straight lines in user space.
+ *
+ * Line by line rather than as one path: every point goes through the same
+ * mapping as everything else on the page, so a stroke lands where it was drawn
+ * on a page that is cropped, turned, or both — which a path handed over whole,
+ * with its own idea of which way up the page is, does not.
+ *
+ * The points are thinned when the stroke is made, so this is tens of lines for a
+ * signature rather than the thousands a pointer actually reports.
+ */
+function drawInkOnPage(pdfPage, annot, mapper) {
+  const points = (annot.points ?? []).map((p) => mapper.pageFractionToUser(p.x, p.y));
+  if (points.length === 0) return;
+
+  const stroke = {
+    thickness: annot.width ?? 2,
+    color: toRgb(annot.color),
+    opacity: annot.opacity ?? 1,
+    lineCap: LineCapStyle.Round,
+  };
+
+  // A tap is a dot: a line from a point to itself, which a round cap makes round.
+  if (points.length === 1) {
+    pdfPage.drawLine({ start: points[0], end: points[0], ...stroke });
+    return;
+  }
+  for (let i = 1; i < points.length; i++) {
+    pdfPage.drawLine({ start: points[i - 1], end: points[i], ...stroke });
   }
 }
 

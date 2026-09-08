@@ -74,6 +74,7 @@ npm run vendor:ocr
 
 | Tool | What it does |
 | --- | --- |
+| Pen | Write on the page by hand — with the mouse, a pen or a finger. Colour, four nib widths and an opacity that turns the pen into a highlighter. Each stroke is one step, so Ctrl+Z takes back the last one, and “rub out” takes a whole stroke at a time. Strokes are saved as real lines in the PDF, not as a picture of the page. |
 | Write → Take over some text | Turns a run of the page's *own* text into an editable box: same place, same size, the ink and paper colours sampled from the page. Two things it cannot do, and says so — the letters are redrawn in the nearest standard font, because the original is embedded as a subset containing only the characters already used; and the old words are covered, not deleted, so they remain in the saved file. It is for correcting a document, not for hiding anything. |
 | Write | Text boxes on the page. **Click into the middle to type or select text; drag the edge to move the box**, or the handles to resize it. Font, size, colour, bold/italic, alignment, box fill, border and rotation. **Highlighting applies to the text you selected**, not to the whole box. |
 | Stamps | Save a styled text box and reuse it. An inserted stamp is an ordinary text box — editing it on the page does **not** change the saved stamp unless you explicitly save it again. |

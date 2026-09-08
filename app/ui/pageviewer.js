@@ -647,7 +647,10 @@ export class PageViewer {
 
   applyEditMode() {
     for (const [id, layer] of this.layers) {
-      layer.setMode(this.editMode === 'crop' && id === this.currentPageId ? 'crop' : 'select');
+      // Cropping and the pen both work on one page — the one being worked on.
+      // Every other page carries on showing what it has.
+      const own = this.editMode !== 'select' && id === this.currentPageId;
+      layer.setMode(own ? this.editMode : 'select');
     }
   }
 
@@ -810,6 +813,8 @@ export class PageViewer {
   refreshText(annot) { this.layer?.refreshText(annot); }
   syncAnnot(annot) { this.layer?.syncAnnot(annot); }
   currentCrop() { return this.layer?.currentCrop() ?? null; }
+  /* The pen writes on the page in front of the reader, like everything else. */
+  setInkStyle(style) { for (const layer of this.layers.values()) layer.setInkStyle(style); }
   cropBox() { return this.layer?.cropBox() ?? null; }
   setCrop(crop) { this.layer?.setCrop(crop); }
 

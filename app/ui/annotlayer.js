@@ -13,7 +13,8 @@
 import { h, icon } from '../util/dom.js';
 import { fillDateWithMarks, hasDate, rawOffset } from '../core/counter.js';
 import { cssFamilyFor } from '../core/fonts.js';
-import { normalizeMarks } from '../core/annots.js';
+import { normalizeMarks, inkPathData } from '../core/annots.js';
+import { pageSize } from '../core/workspace.js';
 import { normalizeCrop } from '../core/geometry.js';
 import { clamp } from '../util/format.js';
 
@@ -40,6 +41,7 @@ export class AnnotationLayer {
     this.mode = 'select';
     this.selectedId = null;
     this.pendingCrop = null;
+    this.inkStyle = { color: '#111827', width: 2, opacity: 1, erase: false };
   }
 
   get annots() {
@@ -54,6 +56,12 @@ export class AnnotationLayer {
   setMode(mode) {
     this.mode = mode;
     this.draw();
+  }
+
+  /** Colour, nib and whether the pen is rubbing out rather than writing. */
+  setInkStyle(style) {
+    this.inkStyle = { ...this.inkStyle, ...style };
+    if (this.mode === 'ink') this.draw();
   }
 
   selectedAnnot() {
@@ -76,7 +84,102 @@ export class AnnotationLayer {
       this.el.appendChild(this.cropUi());
       return;
     }
-    for (const annot of this.annots) this.el.appendChild(this.annotBox(annot));
+
+    // Pen strokes go under the text boxes, in one drawing surface: a page has
+    // one layer of ink on it, however many strokes were made.
+    const strokes = this.annots.filter((a) => a.role === 'ink');
+    if (strokes.length || this.mode === 'ink') this.el.appendChild(this.inkSurface(strokes));
+
+    for (const annot of this.annots) {
+      if (annot.role === 'ink') continue;
+      this.el.appendChild(this.annotBox(annot));
+    }
+  }
+
+  // -------------------------------------------------------------------- ink
+
+  /**
+   * The page's strokes, and — while the pen is out — the means of adding more.
+   *
+   * Drawn as one SVG in the page's own points, so a stroke is a real curve at
+   * any zoom rather than a picture of one, and a 2-point nib stays 2 points on
+   * the page whatever the screen is doing.
+   */
+  inkSurface(strokes) {
+    const { w, h } = pageSize(this.page);
+    const svg = document.createElementNS(SVG_NS, 'svg');
+    svg.setAttribute('class', 'inklayer');
+    svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+    svg.setAttribute('preserveAspectRatio', 'none');
+
+    for (const annot of strokes) svg.appendChild(inkPath(annot, w, h));
+
+    if (this.mode === 'ink') {
+      svg.classList.add('is-drawing');
+      this.wireInk(svg, w, h);
+    }
+    return svg;
+  }
+
+  /**
+   * Making a stroke, and rubbing one out.
+   *
+   * The pointer is captured for the length of the stroke, so a hand that runs
+   * off the edge of the page mid-signature comes back to the same stroke rather
+   * than starting a second one. What is drawn is committed when the pen lifts,
+   * which makes one stroke one step to undo.
+   */
+  wireInk(svg, w, h) {
+    const at = (event) => {
+      const box = this.pageBox();
+      const rect = svg.getBoundingClientRect();
+      return {
+        x: clamp((event.clientX - rect.left) / (box.width || 1), 0, 1),
+        y: clamp((event.clientY - rect.top) / (box.height || 1), 0, 1),
+      };
+    };
+
+    let points = null;
+    let live = null;
+
+    svg.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (this.inkStyle.erase) {
+        const hit = event.target.closest?.('.inkstroke');
+        if (hit) this.handlers.onEraseInk?.(hit.dataset.id);
+        return;
+      }
+
+      svg.setPointerCapture(event.pointerId);
+      points = [at(event)];
+      live = document.createElementNS(SVG_NS, 'path');
+      live.setAttribute('class', 'inkstroke is-live');
+      styleInk(live, this.inkStyle);
+      svg.appendChild(live);
+      live.setAttribute('d', inkPathData(points, w, h));
+    });
+
+    svg.addEventListener('pointermove', (event) => {
+      if (!points) return;
+      event.preventDefault();
+      points.push(at(event));
+      live.setAttribute('d', inkPathData(points, w, h));
+    });
+
+    const finish = (event) => {
+      if (!points) return;
+      const made = points;
+      points = null;
+      live?.remove();
+      live = null;
+      svg.releasePointerCapture?.(event.pointerId);
+      this.handlers.onInk?.(made, { ...this.inkStyle });
+    };
+    svg.addEventListener('pointerup', finish);
+    svg.addEventListener('pointercancel', finish);
   }
 
   // ------------------------------------------------------------- text boxes
@@ -597,4 +700,25 @@ function restoreSelection(root, { start, end }) {
   const selection = window.getSelection();
   selection.removeAllRanges();
   selection.addRange(range);
+}
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+/** One stroke, as it appears on the page. */
+function inkPath(annot, w, h) {
+  const path = document.createElementNS(SVG_NS, 'path');
+  path.setAttribute('class', 'inkstroke');
+  path.dataset.id = annot.id;
+  path.setAttribute('d', inkPathData(annot.points, w, h));
+  styleInk(path, annot);
+  return path;
+}
+
+function styleInk(path, style) {
+  path.setAttribute('fill', 'none');
+  path.setAttribute('stroke', style.color ?? '#111827');
+  path.setAttribute('stroke-width', String(style.width ?? 2));
+  path.setAttribute('stroke-opacity', String(style.opacity ?? 1));
+  path.setAttribute('stroke-linecap', 'round');
+  path.setAttribute('stroke-linejoin', 'round');
 }

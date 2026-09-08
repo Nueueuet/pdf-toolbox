@@ -1,5 +1,6 @@
 /**
- * Annotations: the text boxes produced by Write, Stamps and Watermark.
+ * Annotations: the text boxes produced by Write, Stamps and Watermark, and the
+ * strokes produced by the pen.
  *
  * Layout is computed once, in display points relative to the visible page
  * window, and then consumed by both the canvas preview and the pdf-lib
@@ -36,6 +37,73 @@ export const DEFAULT_ANNOT = {
   opacity: 1,
   rotate: 0,
 };
+
+/**
+ * A stroke of the pen, as one annotation.
+ *
+ * One stroke each rather than one drawing per page: a stroke is what was made
+ * in a single movement, so it is also what a person means by "that one" — the
+ * thing to undo, or to rub out. Points are fractions of the page, like
+ * everything else here, so a signature stays where it was put at any zoom and
+ * on any screen.
+ *
+ * @param {{x: number, y: number}[]} points
+ * @param {{color?: string, width?: number, opacity?: number}} [style] width in
+ *   points, as a pen's nib is quoted
+ */
+export function makeInk(points, style = {}) {
+  const clean = simplifyStroke(points);
+  return makeAnnot({
+    role: 'ink',
+    points: clean,
+    color: style.color ?? '#111827',
+    width: style.width ?? 2,
+    opacity: style.opacity ?? 1,
+    ...inkBounds(clean),
+  });
+}
+
+/** The smallest box the stroke fits in, so it can be handled like any other. */
+export function inkBounds(points) {
+  if (!points?.length) return { x: 0, y: 0, w: 0, h: 0 };
+  const xs = points.map((p) => p.x);
+  const ys = points.map((p) => p.y);
+  const x = Math.min(...xs);
+  const y = Math.min(...ys);
+  return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
+}
+
+/**
+ * Drops the points that say nothing.
+ *
+ * A pointer reports a position every few milliseconds, which for a slow, careful
+ * signature is hundreds of points within a millimetre of each other. Each one
+ * becomes a line in the saved file, so a page of handwriting would carry tens of
+ * thousands of them for a picture indistinguishable from a tenth as many. Kept
+ * are the points that move the pen at least a fifth of a millimetre, and always
+ * the last one, which is where the pen was lifted.
+ */
+export function simplifyStroke(points, least = 0.0005) {
+  const kept = [];
+  for (const point of points ?? []) {
+    const last = kept[kept.length - 1];
+    if (!last || Math.hypot(point.x - last.x, point.y - last.y) >= least) kept.push({ x: point.x, y: point.y });
+  }
+  // The last point is where the pen was lifted, which is part of the shape —
+  // unless it is already the last one kept, as it is for a single tap.
+  const final = points?.[points.length - 1];
+  const last = kept[kept.length - 1];
+  if (final && (!last || last.x !== final.x || last.y !== final.y)) kept.push({ x: final.x, y: final.y });
+  return kept;
+}
+
+/** A stroke as an SVG path, in whatever space its points are given in. */
+export function inkPathData(points, scaleX = 1, scaleY = 1) {
+  if (!points?.length) return '';
+  return points
+    .map((p, i) => `${i === 0 ? 'M' : 'L'}${(p.x * scaleX).toFixed(2)} ${(p.y * scaleY).toFixed(2)}`)
+    .join(' ');
+}
 
 export function makeAnnot(overrides = {}) {
   const annot = { ...DEFAULT_ANNOT, id: uid('an'), ...overrides };
@@ -226,6 +294,10 @@ export function anchorOf(layout, dx, dy) {
  * visible page window.
  */
 export function drawAnnotOnCanvas(ctx, annot, winW, winH, scale) {
+  if (annot.role === 'ink') {
+    drawInkOnCanvas(ctx, annot, winW, winH, scale);
+    return;
+  }
   const layout = layoutAnnot(annot, winW, winH);
   const rad = (layout.rotate * Math.PI) / 180;
 
@@ -258,5 +330,31 @@ export function drawAnnotOnCanvas(ctx, annot, winW, winH, scale) {
     ctx.fillText(line.text, line.dx, line.dy);
   }
 
+  ctx.restore();
+}
+
+/** A pen stroke, drawn the way it is drawn everywhere else: round and joined. */
+function drawInkOnCanvas(ctx, annot, winW, winH, scale) {
+  const points = annot.points ?? [];
+  if (points.length === 0) return;
+
+  ctx.save();
+  ctx.globalAlpha = annot.opacity ?? 1;
+  ctx.scale(scale, scale);
+  ctx.strokeStyle = annot.color;
+  ctx.lineWidth = annot.width ?? 2;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  ctx.beginPath();
+  for (const [i, point] of points.entries()) {
+    const x = point.x * winW;
+    const y = point.y * winH;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  // A single tap is a dot, which a stroke of no length does not draw.
+  if (points.length === 1) ctx.lineTo(points[0].x * winW + 0.01, points[0].y * winH);
+  ctx.stroke();
   ctx.restore();
 }

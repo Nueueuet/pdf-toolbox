@@ -1690,6 +1690,32 @@ input.partrow__name.is-clashing {
 }
 
 /*
+ * Ink: what the pen leaves on the page.
+ *
+ * One surface per page, covering it exactly, with the strokes inside it in the
+ * page's own points — so a stroke is a real curve at any zoom rather than a
+ * picture of one. It lets the pointer through except while the pen is out.
+ */
+.inklayer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.inklayer.is-drawing {
+  pointer-events: auto;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.viewer.is-erasing .inklayer.is-drawing { cursor: cell; }
+.viewer.is-erasing .inkstroke { pointer-events: stroke; }
+.viewer.is-erasing .inkstroke:hover { stroke: var(--danger); }
+
+/*
  * The sign that a page is being drawn.
  *
  * A large plan takes seconds — spent working through the drawing itself rather

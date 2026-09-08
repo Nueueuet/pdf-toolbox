@@ -144,6 +144,65 @@ function textProperties(ctx, { onEdit }) {
   };
 }
 
+// --------------------------------------------------------------------- pen
+
+const PEN_WIDTHS = [
+  { value: '1', label: 'Fine — 1 pt' },
+  { value: '2', label: 'Medium — 2 pt' },
+  { value: '4', label: 'Broad — 4 pt' },
+  { value: '8', label: 'Marker — 8 pt' },
+];
+
+const pen = {
+  id: 'pen',
+  label: 'Pen',
+  group: 'Content',
+  mode: 'viewer',
+  editorMode: 'ink',
+  icon: 'M12 19l7-7a2.83 2.83 0 0 0-4-4l-7 7-1 5 5-1Z M15 6l3 3 M3 21h6',
+  blurb: 'Write on the page by hand. Draw with the mouse, a pen or a finger.',
+  panel(ctx) {
+    const color = colorInput({ value: '#111827', onchange: () => apply() });
+    const width = select({ value: '2', options: PEN_WIDTHS, onchange: () => apply() });
+    const opacity = slider({ value: 100, min: 10, max: 100, step: 1, format: (v) => `${v}%`, oninput: () => apply() });
+    /*
+     * Rubbing out takes the whole stroke, not the part under the pointer.
+     *
+     * A stroke is what was made in one movement, which is also what a person
+     * means by "that one" — and taking a bite out of the middle of a line would
+     * mean splitting it in two, which is a lot of machinery for something an
+     * undo does better.
+     */
+    const erase = checkbox({ label: 'Rub out whole strokes', checked: false, onchange: () => apply() });
+
+    const style = () => ({
+      color: color.value,
+      width: Number(width.value) || 2,
+      opacity: (opacity.valueAsNumber ?? 100) / 100,
+      erase: erase.checked,
+    });
+
+    const apply = () => {
+      ctx.editor.setInkStyle?.(style());
+      ctx.app.viewer?.root.classList.toggle('is-erasing', erase.checked);
+    };
+    apply();
+    ctx.onClose(() => {
+      ctx.app.viewer?.root.classList.remove('is-erasing');
+      ctx.editor.setInkStyle?.({ erase: false });
+    });
+
+    return h('div',
+      section('Pen',
+        h('div.grid2', field('Colour', color), field('Nib', width)),
+        field('Opacity', opacity, 'Below full it reads as a highlighter'),
+        erase,
+        hint('Draw on the page to write. Each stroke is one step, so Ctrl+Z takes back the last one.'),
+      ),
+    );
+  },
+};
+
 // ------------------------------------------------------------------- write
 
 const write = {
@@ -722,4 +781,4 @@ const background = {
   },
 };
 
-export default [write, stamps, watermark, background];
+export default [pen, write, stamps, watermark, background];

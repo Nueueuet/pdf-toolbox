@@ -10,7 +10,7 @@ import { Workspace, normalizeQuarter } from '../app/core/workspace.js';
 import { TOOLS } from '../app/tools/index.js';
 import { buildPdf, needsRaster } from '../app/core/export.js';
 import { renderPageCanvas } from '../app/core/render.js';
-import { makeAnnot, applyMark } from '../app/core/annots.js';
+import { makeAnnot, applyMark, makeInk, simplifyStroke, inkBounds } from '../app/core/annots.js';
 import { wrapText } from '../app/core/fonts.js';
 import { pageSize } from '../app/core/workspace.js';
 import { extractRows, toCsv } from '../app/core/text.js';
@@ -1151,6 +1151,99 @@ test('a slow page is not redrawn for every notch of the wheel', async () => {
   }
 });
 
+test('a stroke of the pen is saved where it was drawn', async () => {
+  /*
+   * Handwriting is the one thing on a page whose position nobody can correct
+   * afterwards: a signature two centimetres from where it was written is not a
+   * signature. So this writes a stroke, saves the file, reads it back and looks
+   * for the ink — on an upright page and on one carrying a rotation, which is
+   * where coordinate mistakes live.
+   */
+  const draw = async (rotation) => {
+    const doc = await PDFDocument.create();
+    const sheet = doc.addPage([400, 600]);
+    if (rotation) sheet.setRotation(degrees(rotation));
+    const bytes = await doc.save();
+
+    const ws = new Workspace();
+    await ws.addFiles([new File([bytes], 'blank.pdf', { type: 'application/pdf' })]);
+    const page = ws.pages[0];
+
+    // A short diagonal, well inside the page, in fractions of it as shown.
+    const stroke = makeInk([
+      { x: 0.2, y: 0.2 }, { x: 0.3, y: 0.3 }, { x: 0.4, y: 0.4 }, { x: 0.5, y: 0.5 },
+    ], { color: '#000000', width: 4 });
+    page.annots.push(stroke);
+
+    const out = await buildPdf(ws, [page], {});
+    const { canvas } = await renderBytes(out, 0);
+    const ctx = canvas.getContext('2d');
+    const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+    let minX = Infinity; let minY = Infinity; let maxX = -1; let maxY = -1;
+    for (let y = 0; y < canvas.height; y++) {
+      for (let x = 0; x < canvas.width; x++) {
+        const i = (y * canvas.width + x) * 4;
+        if (data[i] > 120 || data[i + 1] > 120 || data[i + 2] > 120) continue;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+    return { canvas, found: maxX < 0 ? null : { minX, minY, maxX, maxY }, stroke };
+  };
+
+  for (const rotation of [0, 90, 270]) {
+    const { canvas, found, stroke } = await draw(rotation);
+    assert(found, `nothing was drawn on the page at all (rotation ${rotation})`);
+
+    // Where the stroke says it is, in the saved page's own pixels.
+    const want = {
+      x0: stroke.x * canvas.width,
+      y0: stroke.y * canvas.height,
+      x1: (stroke.x + stroke.w) * canvas.width,
+      y1: (stroke.y + stroke.h) * canvas.height,
+    };
+    // Half the nib either side, and a pixel for rounding.
+    const slack = 5;
+    near(found.minX, want.x0, slack, `ink starts across the page (rotation ${rotation})`);
+    near(found.minY, want.y0, slack, `ink starts down the page (rotation ${rotation})`);
+    near(found.maxX, want.x1, slack, `ink ends across the page (rotation ${rotation})`);
+    near(found.maxY, want.y1, slack, `ink ends down the page (rotation ${rotation})`);
+  }
+});
+
+test('a stroke keeps its shape and drops the points that say nothing', async () => {
+  /*
+   * A pointer reports a position every few milliseconds, so a slow signature is
+   * hundreds of points within a millimetre of each other — and every one of them
+   * becomes a line in the saved file.
+   */
+  const crawl = [];
+  for (let i = 0; i < 200; i++) crawl.push({ x: 0.2 + i * 0.000001, y: 0.3 });
+  crawl.push({ x: 0.6, y: 0.3 });
+  const thinned = simplifyStroke(crawl);
+  assert(thinned.length < 10, `${thinned.length} points survived a stroke that barely moved`);
+  assert(thinned[thinned.length - 1].x === 0.6, 'the end of the stroke was thinned away');
+  assert(thinned[0].x === 0.2, 'the start of the stroke was thinned away');
+
+  // A real stroke keeps its shape.
+  const curve = [];
+  for (let i = 0; i <= 100; i++) curve.push({ x: i / 100, y: 0.5 + Math.sin(i / 8) * 0.1 });
+  const kept = simplifyStroke(curve);
+  assert(kept.length > 40, `a real stroke lost its shape: ${kept.length} of ${curve.length} points`);
+
+  const box = inkBounds(curve);
+  near(box.x, 0, 0.001, 'stroke box starts at the left');
+  near(box.w, 1, 0.001, 'stroke box spans the page');
+  assert(box.h > 0.15 && box.h < 0.25, `stroke box height came out ${box.h.toFixed(3)}`);
+
+  // A tap is a dot, and a dot is still a mark.
+  const dot = makeInk([{ x: 0.5, y: 0.5 }], {});
+  assert(dot.points.length === 1 && dot.w === 0, 'a single tap should stay a single point');
+});
+
 test('a press between the words finds the nearest word', async () => {
   /*
    * Most of a page is the space between the words. A press there gave the
@@ -1485,7 +1578,7 @@ test('no tool takes away the choice of where you are', async () => {
    * The three that ask for a page are the ones done with the pointer on the page
    * itself. There is nothing to point at in a grid of thumbnails.
    */
-  const withThePointer = new Set(['viewer', 'write', 'stamps', 'crop']);
+  const withThePointer = new Set(['viewer', 'pen', 'write', 'stamps', 'crop']);
   for (const tool of TOOLS) {
     const wanted = withThePointer.has(tool.id) ? 'viewer' : 'any';
     assert(tool.mode === wanted,
