@@ -84,16 +84,16 @@ const UNPACKED_DIR = 'extension';
  * The destination is machine-specific, so it lives in a gitignored file rather
  * than in this script: put the absolute path in `mirror.local.txt`, or set
  * PDF_TOOLBOX_MIRROR. With neither, this step is skipped.
+ *
+ * A second line in that file, if there is one, is a folder that gets the newest
+ * zip and nothing else — somewhere to reach for the current build without
+ * picking it out of a folder that also holds the unpacked copy and the store
+ * material. Older zips this script wrote there are cleared away, so the folder
+ * always holds exactly one.
  */
 async function mirror(fromDir, zipFile) {
-  let target = process.env.PDF_TOOLBOX_MIRROR?.trim();
-  if (!target) {
-    try {
-      target = (await readFile(path.join(root, 'mirror.local.txt'), 'utf8')).trim();
-    } catch {
-      return null;
-    }
-  }
+  const lines = await destinations();
+  const target = lines[0];
   if (!target) return null;
 
   // Mirroring wipes the destination, so refuse anything that is not already an
@@ -162,6 +162,41 @@ async function mirror(fromDir, zipFile) {
     console.warn(`  note: ${locked.length} old file(s) could not be removed (in use by a browser); harmless`);
   }
   return target;
+}
+
+/** Where the build is copied to: the mirror, then optionally a zip-only folder. */
+async function destinations() {
+  const fromEnv = process.env.PDF_TOOLBOX_MIRROR?.trim();
+  if (fromEnv) return [fromEnv];
+  try {
+    const text = await readFile(path.join(root, 'mirror.local.txt'), 'utf8');
+    return text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Drops the newest zip into a folder of its own.
+ *
+ * Only zips this script named are cleared out of it, and only ones that are not
+ * the current build — the folder may well hold other things, and a build script
+ * has no business deleting what it did not write.
+ */
+async function dropNewestZip(zipFile) {
+  const target = (await destinations())[1];
+  if (!target) return null;
+
+  await mkdir(target, { recursive: true });
+  const name = path.basename(zipFile);
+  await writeFile(path.join(target, name), await readFile(zipFile));
+
+  for (const entry of await readdir(target)) {
+    if (entry === name) continue;
+    if (!/^pdf-toolbox-.*\.zip$/i.test(entry)) continue;
+    await rm(path.join(target, entry), { force: true }).catch(() => {});
+  }
+  return path.join(target, name);
 }
 
 /**
@@ -284,12 +319,14 @@ const unpacked = await sizeOf(stageDir);
 const packed = (await stat(zipPath)).size;
 
 const mirroredTo = await mirror(stageDir, zipPath);
+const droppedTo = await dropNewestZip(zipPath);
 await rm(stageDir, { recursive: true, force: true });
 
 const mb = (bytes) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 console.log(`\nwrote dist/${zipName}`);
 console.log(`  packed ${mb(packed)}, unpacked ${mb(unpacked)}`);
 console.log(`  AI upscaler: ${aiIncluded ? 'included' : 'not included'}`);
+if (droppedTo) console.log(`  newest zip: ${droppedTo}`);
 if (mirroredTo) {
   console.log(`  mirrored to ${mirroredTo}`);
   console.log(`    ${UNPACKED_DIR}/ — load this folder unpacked; the zip, the pictures and STORE.md sit beside it`);

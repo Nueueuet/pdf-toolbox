@@ -223,6 +223,11 @@ pdf-toolbox-<v>.zip     the package to upload
 STORE.md                the listing text to paste
 ```
 
+A second line in `mirror.local.txt` is a folder that gets only the newest zip —
+somewhere to reach for the current build without picking it out of a folder that
+also holds the unpacked copy and the store material. Older zips this script put
+there are cleared away, so it holds exactly one.
+
 Only `extension/` is rewritten wholesale each time. Beside it, nothing is
 removed except superseded zips, because that folder belongs to whoever set it —
 a build script has no business deleting what it did not write. It also refuses a
