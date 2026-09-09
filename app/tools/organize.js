@@ -15,23 +15,20 @@ import { fillCounter, hasCounter, COUNTER_KINDS, markKind, setMarkKind } from '.
 import { progressToast, toast } from '../ui/toast.js';
 
 /**
- * Shared "which pages?" control. Defaults to the current selection so the
- * grid and the panel never disagree about what is about to be edited.
+ * Shared "which pages?" control.
+ *
+ * It says "all", always, and nothing changes that by itself.
+ *
+ * It used to open on whatever was selected, which sounds helpful and is not:
+ * clicking a page in the overview to look at it selects it, and every tool
+ * opened afterwards then quietly proposed to work on that one page. Saving a
+ * document of nine pages wrote one, and said so only in small type. A default
+ * that changes behind you is worse than a default that is sometimes wrong.
+ *
+ * What is selected is still one press away, and named — see the button below.
  */
 function pageScope(ctx, { label = 'Pages' } = {}) {
-  /*
-   * The whole document unless pages were picked out by hand.
-   *
-   * Reading one page used to make that page the default, which read as the tool
-   * offering to work on the whole document and then quietly not doing it — the
-   * field said "1" and a document of nine pages came out as one. Pages chosen in
-   * the overview are a deliberate act and still stand; being on a page is not.
-   */
-  const picked = ctx.ws.selection.size && !ctx.app.onSinglePage;
-  const initial = picked
-    ? formatRange([...ctx.ws.selection].map((id) => ctx.ws.indexOf(id) + 1))
-    : 'all';
-  const control = rangeField({ value: initial });
+  const control = rangeField({ value: 'all' });
 
   const resolve = () => {
     const { pages, error } = parseRange(control.value, ctx.ws.pageCount);
@@ -40,16 +37,28 @@ function pageScope(ctx, { label = 'Pages' } = {}) {
   };
   control.addEventListener('input', resolve);
 
-  // Keep in step when the user changes the selection in the grid.
-  const off = ctx.ws.on('selection', () => {
-    if (ctx.ws.selection.size === 0) return;
-    control.value = formatRange([...ctx.ws.selection].map((id) => ctx.ws.indexOf(id) + 1));
-    control.setError(null);
+  const useSelection = button('', {
+    onclick: () => {
+      control.value = formatRange([...ctx.ws.selection].map((id) => ctx.ws.indexOf(id) + 1));
+      control.setError(null);
+      resolve();
+    },
   });
-  ctx.onClose(off);
+
+  // Offered while pages are picked out, and named so the offer is not a riddle.
+  const syncOffer = () => {
+    const count = ctx.ws.selection.size;
+    useSelection.hidden = count === 0;
+    useSelection.textContent = `Use the ${count} ${count === 1 ? 'page' : 'pages'} selected`;
+  };
+  syncOffer();
+  ctx.onClose(ctx.ws.on('selection', syncOffer));
 
   return {
-    el: field(label, control, 'Type “all” for the whole document, or a range: 1-10 · 1,4,10 · odd · last'),
+    el: h('div',
+      field(label, control, 'Type “all” for the whole document, or a range: 1-10 · 1,4,10 · odd · last'),
+      useSelection,
+    ),
     resolve,
   };
 }

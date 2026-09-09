@@ -1248,12 +1248,15 @@ class App {
   /** @returns {Promise<{pages: object[], filename: string}|null>} null if cancelled. */
   askWhichPages() {
     const total = this.ws.pageCount;
-    // What is selected in the grid is almost always what someone means by "these
-    // pages", so the field opens on it rather than making them type it again.
-    const selected = [...this.ws.selection];
-    const start = selected.length > 0 && selected.length < total
-      ? formatRange(selected.map((id) => this.ws.indexOf(id) + 1))
-      : 'all';
+    /*
+     * The whole document, always — the same rule the panels follow.
+     *
+     * Opening on whatever happened to be selected meant that clicking a page to
+     * look at it, and then saving, wrote that one page. The line below the field
+     * says what will come out either way, but a default that changes behind you
+     * is not something anyone should have to read their way out of.
+     */
+    const start = 'all';
 
     return modal({
       title: 'Save PDF',

@@ -8,6 +8,7 @@
  */
 import { Workspace, normalizeQuarter } from '../app/core/workspace.js';
 import { TOOLS } from '../app/tools/index.js';
+import { pageScope } from '../app/tools/organize.js';
 import { buildPdf, needsRaster } from '../app/core/export.js';
 import { renderPageCanvas } from '../app/core/render.js';
 import { makeAnnot, applyMark, makeInk, simplifyStroke, inkBounds } from '../app/core/annots.js';
@@ -1564,6 +1565,63 @@ test('renaming the document does not redraw it', async () => {
   } finally {
     viewer.destroy();
     host.remove();
+  }
+});
+
+test('every "which pages" field opens on the whole document', async () => {
+  /*
+   * Clicking a page in the overview to look at it selects it, and the field used
+   * to open on whatever was selected. So a document of nine pages was saved as
+   * one page, with nothing to warn of it but a line of small type — and it
+   * varied with whatever had been clicked last, which is worse than being wrong
+   * consistently.
+   *
+   * The selection is still one press away, and the press says how many pages it
+   * means.
+   */
+  const ws = await loadWorkspace(['report.pdf']);
+  const cleanups = [];
+  const app = {
+    onSinglePage: false,
+    viewer: null,
+    exportOptions: () => ({}),
+  };
+  const ctx = {
+    ws,
+    app,
+    currentPage: () => ws.pages[0],
+    commit: (label, mutate) => ws.commit(label, mutate),
+    onClose: (fn) => cleanups.push(fn),
+    editor: { setInkStyle() {} },
+    touch() {},
+  };
+
+  try {
+    // As if a page had been clicked in the overview.
+    ws.selection.add(ws.pages[0].id);
+
+    const scope = pageScope(ctx);
+    const field = scope.el.querySelector('input');
+    assert(field.value === 'all', `the field opened on "${field.value}" with one page selected`);
+    assert(scope.resolve().length === ws.pageCount,
+      'the field says the whole document but does not mean it');
+
+    const offer = [...scope.el.querySelectorAll('button')].find((b) => /Use the/.test(b.textContent));
+    assert(offer && !offer.hidden, 'the pages picked out were not offered at all');
+    assert(/1 page/.test(offer.textContent), `the offer does not say what it means: "${offer.textContent}"`);
+
+    offer.click();
+    assert(field.value === '1', `pressing the offer gave "${field.value}"`);
+    assert(scope.resolve().length === 1, 'the offer did not take effect');
+
+    // Nothing selected: no offer to make.
+    ws.selection.clear();
+    const bare = pageScope(ctx);
+    const none = [...bare.el.querySelectorAll('button')].find((b) => /Use the/.test(b.textContent));
+    assert(!none || none.hidden, 'an offer was made with nothing selected');
+    assert(bare.el.querySelector('input').value === 'all', 'the field should still say all');
+  } finally {
+    for (const fn of cleanups) fn();
   }
 });
 

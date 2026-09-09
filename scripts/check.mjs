@@ -98,7 +98,13 @@ if (await exists('sandbox/ocr-sandbox.html')) {
     note("the sandbox policy needs 'unsafe-eval' — the OCR engine cannot start without it");
   }
 }
-const IMPORT = /(?:^|\n)\s*(?:import|export)[\s\S]*?from\s+['"]([^'"]+)['"]/g;
+/*
+ * The word boundary matters. Without it a property called `exportOptions:`
+ * counts as the start of an export statement, and the scan then runs on to the
+ * next `from "…"` anywhere below it — which in one file was a line of ordinary
+ * text inside a template string, reported as a bare import that did not exist.
+ */
+const IMPORT = /(?:^|\n)\s*(?:import|export)\b[\s\S]*?from\s+['"]([^'"]+)['"]/g;
 
 for (const file of sources) {
   const text = await readFile(path.join(root, file), 'utf8');
