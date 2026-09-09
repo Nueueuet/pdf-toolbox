@@ -25,17 +25,17 @@ const save = {
     const name = textInput({
       value: baseName(ctx.ws.name),
       placeholder: 'document',
-      oninput: (value) => {
-        ctx.ws.name = value.trim() || 'document';
-        // Only the caption follows a rename — redrawing the document for it made
-        // the pages flicker under every keystroke.
-        ctx.app.syncDocName();
-      },
+      // Only the caption follows a rename — redrawing the document for it made
+      // the pages flicker under every keystroke.
+      oninput: (value) => ctx.app.renameDocument(value),
     });
-    // The title bar edits the same name, so it has to be followed back.
-    ctx.onClose(ctx.ws.on('pages', () => {
+    // The title bar and the merge panel edit the same name, so it is followed
+    // back — unless the caret is in this box, which would fight the typing.
+    const followName = () => {
       if (document.activeElement !== name) name.value = baseName(ctx.ws.name);
-    }));
+    };
+    ctx.onClose(ctx.ws.on('name', followName));
+    ctx.onClose(ctx.ws.on('pages', followName));
 
     const scope = pageScope(ctx, { label: 'Pages to save' });
     const withAnnots = checkbox({ label: 'Include text boxes, stamps and watermarks', checked: true });

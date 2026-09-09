@@ -125,17 +125,17 @@ const merge = {
     const outputName = textInput({
       value: baseName(ctx.ws.name),
       placeholder: 'document',
-      oninput: (value) => {
-        ctx.ws.name = value.trim() || 'document';
-        // Only the caption follows: redrawing the document for a change of name
-        // made it flicker under every keystroke.
-        ctx.app.syncDocName();
-      },
+      // Only the caption follows a rename: redrawing the document for a change
+      // of name made it flicker under every keystroke.
+      oninput: (value) => ctx.app.renameDocument(value),
     });
-    // The title bar edits the same name, so it has to be followed back.
-    ctx.onClose(ctx.ws.on('pages', () => {
+    // The title bar and the save panel edit the same name, so it is followed
+    // back — unless the caret is in this box, which would fight the typing.
+    const followName = () => {
       if (document.activeElement !== outputName) outputName.value = baseName(ctx.ws.name);
-    }));
+    };
+    ctx.onClose(ctx.ws.on('name', followName));
+    ctx.onClose(ctx.ws.on('pages', followName));
 
     const renderList = () => {
       clear(list);
@@ -167,10 +167,7 @@ const merge = {
             source.name = `${typed}.pdf`;
             // One file in the workspace is the document: what comes out of
             // saving *is* that file, so the two names are the same name.
-            if (counts.size === 1 && ctx.ws.name !== typed) {
-              ctx.ws.name = typed;
-              ctx.app.syncDocName();
-            }
+            if (counts.size === 1) ctx.app.renameDocument(typed);
           },
         });
 

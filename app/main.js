@@ -532,8 +532,7 @@ class App {
      * document flickered under the name being typed.
      */
     this.el.docTitle.addEventListener('input', () => {
-      this.ws.name = this.el.docTitle.value.trim() || 'document';
-      this.syncDocName();
+      this.renameDocument(this.el.docTitle.value);
     });
   }
 
@@ -799,6 +798,23 @@ class App {
    * name should not have to redraw every page and thumbnail to have the title
    * bar and the tab follow along.
    */
+  /**
+   * Renames the document, from wherever the name was typed.
+   *
+   * Announced, because the name is shown in three places at once — the title
+   * bar, the merge panel and the save panel — and typing it in one of them has
+   * to reach the others. It was only ever announced by the path that redraws
+   * every page, which renaming is not allowed to do, so a name typed in the
+   * title bar sat there alone.
+   */
+  renameDocument(name) {
+    const clean = String(name ?? '').trim() || 'document';
+    if (this.ws.name === clean) return;
+    this.ws.name = clean;
+    this.syncDocName();
+    this.ws.emit('name');
+  }
+
   syncDocName() {
     if (document.activeElement !== this.el.docTitle) this.el.docTitle.value = this.ws.name;
     // Readable in full even where the bar is too narrow to show it in full.

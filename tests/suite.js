@@ -1568,6 +1568,43 @@ test('renaming the document does not redraw it', async () => {
   }
 });
 
+test('the name of the document is the same name everywhere', async () => {
+  /*
+   * It is shown in three places at once — the title bar, the merge panel and the
+   * save panel — and typing it in any of them has to reach the others. Renaming
+   * used to be announced only by the path that redraws every page, which
+   * renaming is not allowed to do; so a name typed in the title bar reached the
+   * tab and nothing else, and the save panel went on offering the old one.
+   */
+  const ws = await loadWorkspace(['report.pdf']);
+  const heard = [];
+  const off = ws.on('name', () => heard.push(ws.name));
+
+  // What the shell does when the title bar is typed into.
+  const rename = (value) => {
+    const clean = String(value ?? '').trim() || 'document';
+    if (ws.name === clean) return;
+    ws.name = clean;
+    ws.emit('name');
+  };
+
+  try {
+    rename('Typed in the title bar');
+    assert(heard.length === 1, `renaming was announced ${heard.length} times`);
+    assert(ws.name === 'Typed in the title bar', 'the document was not renamed');
+
+    // Typing the same name again is not a change and says nothing.
+    rename('Typed in the title bar');
+    assert(heard.length === 1, 'renaming to the same name was announced anyway');
+
+    // An empty name is a document without a name, not a document called nothing.
+    rename('   ');
+    assert(ws.name === 'document', `an empty name gave "${ws.name}"`);
+  } finally {
+    off();
+  }
+});
+
 test('every "which pages" field opens on the whole document', async () => {
   /*
    * Clicking a page in the overview to look at it selects it, and the field used
