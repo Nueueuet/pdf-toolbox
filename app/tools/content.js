@@ -14,6 +14,9 @@ import { toast } from '../ui/toast.js';
 import { confirmDialog, modal } from '../ui/modal.js';
 import * as storage from '../core/storage.js';
 
+/** Where the stamp placement habit is remembered. */
+const PLACEMENT_KEY = 'stamp-placement';
+
 const ALIGNMENTS = [
   { value: 'left', label: 'Left' },
   { value: 'center', label: 'Centre' },
@@ -228,7 +231,7 @@ const write = {
       const page = ctx.currentPage();
       if (!page) return toast('Open a page first', { tone: 'error' });
       const annot = makeAnnot({ text: 'New text', x: 0.12, y: 0.12, w: 0.45, h: 0.1 });
-      ctx.commit('Add text', () => page.annots.push(annot));
+      ctx.commit('Add text', () => page.annots.push(annot), { structural: false });
       ctx.editor.drawOverlay();
       // Placeholder pre-selected, so the first keystroke replaces it.
       ctx.editor.focusText(annot, { at: 'all' });
@@ -269,7 +272,7 @@ const write = {
           valign: 'middle',
           padding: 0,
         });
-        ctx.commit('Take over text', () => page.annots.push(annot));
+        ctx.commit('Take over text', () => page.annots.push(annot), { structural: false });
         ctx.editor.drawOverlay();
         ctx.editor.focusText(annot, { at: 'end' });
       });
@@ -490,7 +493,21 @@ const stamps = {
      * you commit to it, which is why the pointer carries the stamp's real
      * footprint while you look for a gap.
      */
-    const byClick = checkbox({ label: 'Place where I click', checked: false });
+    /*
+     * Remembered between sessions, like the reading layout.
+     *
+     * Where a stamp goes is a habit — a signature block belongs in the same
+     * corner of every letter, or it belongs wherever the pointer is, and which
+     * of those someone means does not change from one document to the next. It
+     * used to reset to "where it was saved" on every open, so anyone with the
+     * other habit set it again every single time.
+     */
+    const byClick = checkbox({
+      label: 'Place where I click',
+      checked: false,
+      onchange: (on) => storage.set(PLACEMENT_KEY, on),
+    });
+    storage.get(PLACEMENT_KEY, false).then((saved) => { byClick.checked = Boolean(saved); });
 
     const put = (stamp, page, at) => {
       /*
@@ -501,7 +518,9 @@ const stamps = {
        * Double-clicking the date brings the mark back to be edited.
        */
       const annot = makeAnnot({ ...stamp.annot, ...at, role: 'stamp', stampId: stamp.id });
-      ctx.commit(`Insert ${stamp.name}`, () => page.annots.push(annot));
+      // Not structural: a stamp lands on a page without moving it. Rebuilding
+      // the document for it flickers, and re-centres the view under the stamp.
+      ctx.commit(`Insert ${stamp.name}`, () => page.annots.push(annot), { structural: false });
       ctx.editor.drawOverlay();
       // A stamp arrives with its wording already right, so the caret goes to the
       // end rather than selecting it all.

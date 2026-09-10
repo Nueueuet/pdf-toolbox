@@ -94,7 +94,7 @@ class App {
         this.ws.commit('Edit text', () => {
           annot.text = after.text;
           annot.marks = after.marks;
-        });
+        }, { structural: false });
       },
     });
 
@@ -104,7 +104,7 @@ class App {
     this.wireKeys();
 
     this.guardAgainstReload();
-    this.ws.on('pages', () => this.onPagesChanged());
+    this.ws.on('pages', (event) => this.onPagesChanged(event.detail));
     // Recognition changes only the badges and the overlay, so it repaints the
     // grid without going through the full page-change path.
     this.ws.on('ocr', () => {
@@ -744,7 +744,11 @@ class App {
     return this.ws.pageById(this.currentPageId) ?? this.ws.pages[0] ?? null;
   }
 
-  onPagesChanged() {
+  /**
+   * @param {{structural?: boolean}} [detail] structural false when only what is
+   *   drawn on the pages changed — a text box, a stamp, a stroke of the pen.
+   */
+  onPagesChanged(detail = {}) {
     const hasPages = this.ws.pageCount > 0;
     /*
      * An empty document with something in the recoverable list is not really
@@ -780,6 +784,23 @@ class App {
 
     if (this.currentPageId && !this.ws.pageById(this.currentPageId)) {
       this.currentPageId = this.ws.pages[0]?.id ?? null;
+    }
+
+    /*
+     * Marks on a page do not move the page.
+     *
+     * Rebuilding the document for them costs a visible flicker — every frame
+     * thrown away and drawn again — and, worse, puts the view back where a fresh
+     * render would put it: centred. Placing a stamp while zoomed in on the left
+     * of a sheet therefore slid the page out from under it, which reads as the
+     * stamp having landed somewhere else than it was dropped.
+     */
+    if (detail.structural === false) {
+      this.surfaceEditor.drawOverlay();
+      this.scheduleThumbRefresh();
+      this.syncSelectionStatus();
+      this.syncHistoryButtons();
+      return;
     }
 
     this.grid.render();
@@ -915,7 +936,7 @@ class App {
       editor: this.surfaceEditor,
       grid: this.grid,
       currentPage: () => this.currentPage(),
-      commit: (label, mutate) => this.ws.commit(label, mutate),
+      commit: (label, mutate, opts) => this.ws.commit(label, mutate, opts),
       touch: () => this.scheduleThumbRefresh(),
       onClose: (cleanup) => this.panelCleanups.push(cleanup),
       onSelectAnnot: (listener) => this.annotListeners.push(listener),
@@ -942,7 +963,7 @@ class App {
 
     const annot = makeInk(points, style);
     if (annot.points.length < 2 && annot.w < 0.002 && annot.h < 0.002) return;
-    this.ws.commit('Draw', () => page.annots.push(annot));
+    this.ws.commit('Draw', () => page.annots.push(annot), { structural: false });
     this.surfaceEditor.drawOverlay();
     this.scheduleThumbRefresh();
   }
@@ -954,7 +975,7 @@ class App {
     if (!annot) return;
     this.ws.commit('Rub out', () => {
       page.annots = page.annots.filter((a) => a.id !== id);
-    });
+    }, { structural: false });
     this.surfaceEditor.drawOverlay();
     this.scheduleThumbRefresh();
   }
@@ -965,7 +986,7 @@ class App {
     if (!page || !annot) return;
     this.ws.commit(annot.role === 'stamp' ? 'Delete stamp' : 'Delete text box', () => {
       page.annots = page.annots.filter((a) => a.id !== annot.id);
-    });
+    }, { structural: false });
     this.surfaceEditor.drawOverlay();
     this.surfaceEditor.select(null);
     toast('Deleted', {

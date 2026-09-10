@@ -171,16 +171,22 @@ export class Workspace extends EventTarget {
 
   /**
    * Runs a mutation as one undoable step.
+   *
    * @param {string} label shown in the undo tooltip
    * @param {() => void|Promise<void>} mutate
+   * @param {{structural?: boolean}} [opts] structural false for a change that
+   *   leaves the pages themselves alone — a text box, a stamp, a stroke of the
+   *   pen. What is drawn *on* a page does not move the page, and rebuilding the
+   *   document for it costs a visible flicker and, worse, throws the view back
+   *   to the middle of the page just as somebody was working at its edge.
    */
-  async commit(label, mutate) {
+  async commit(label, mutate, { structural = true } = {}) {
     const before = this.#cloneState();
     await mutate();
     this.history.push({ label, state: before });
     if (this.history.length > 60) this.history.shift();
     this.future.length = 0;
-    this.emit('pages');
+    this.emit('pages', { structural });
     this.emit('history');
   }
 

@@ -1568,6 +1568,40 @@ test('renaming the document does not redraw it', async () => {
   }
 });
 
+test('a mark on a page does not count as a change to the pages', async () => {
+  /*
+   * Adding a stamp went through the same path as adding or removing a page,
+   * which rebuilds every frame. That costs a visible flicker, and — because a
+   * fresh render centres the page — it slid the page sideways out from under
+   * the stamp just as it landed: placed at the left edge of a sheet zoomed in,
+   * the stamp appeared to have moved. Both are the same mistake, that a mark on
+   * a page is a change to the page.
+   */
+  const ws = await loadWorkspace(['report.pdf']);
+  const page = ws.pages[0];
+  const heard = [];
+  const off = ws.on('pages', (event) => heard.push(event.detail?.structural));
+
+  try {
+    await ws.commit('Insert stamp', () => {
+      page.annots.push(makeAnnot({ text: 'Approved', x: 0.1, y: 0.1, w: 0.3, h: 0.06 }));
+    }, { structural: false });
+    assert(heard.length === 1 && heard[0] === false,
+      `a stamp was announced as ${JSON.stringify(heard)}`);
+    assert(ws.canUndo, 'a stamp still has to be one step to undo');
+
+    // Anything that really does move the pages says so, which is the default.
+    await ws.commit('Remove page', () => { ws.pages = ws.pages.slice(1); });
+    assert(heard.length === 2 && heard[1] !== false,
+      `removing a page was announced as ${JSON.stringify(heard)}`);
+
+    ws.undo();
+    assert(ws.pageCount === 5, `undo did not put the page back: ${ws.pageCount} left`);
+  } finally {
+    off();
+  }
+});
+
 test('the name of the document is the same name everywhere', async () => {
   /*
    * It is shown in three places at once — the title bar, the merge panel and the
