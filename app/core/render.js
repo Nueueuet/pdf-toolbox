@@ -5,6 +5,7 @@
  * the thumbnail grid, the tool previews, and the raster export path.
  */
 import { makeMapper, totalQuarter } from './geometry.js';
+import { pageSize } from './workspace.js';
 import { drawAnnotOnCanvas } from './annots.js';
 
 /** pdf.js viewport for a page at its total rotation. */
@@ -24,6 +25,34 @@ export async function viewportFor(ws, page, scale = 1) {
 }
 
 /**
+ * How finely one part of a page can usefully be drawn, in pixels per point.
+ *
+ * A page drawn from the file has no limit worth naming: it is instructions, and
+ * they can be followed at any size. A page that *is* a picture — a scan, an
+ * upscaled page, an imported image — has exactly as much detail as the picture
+ * has, and asking for more spends time to produce a blur with more pixels in it.
+ *
+ * @returns {number} Infinity for a page drawn from the file
+ */
+export function detailCeiling(ws, page) {
+  const raster = ws.raster(page.rasterId);
+  if (raster) return rasterCeiling(raster.width, raster.height, page);
+
+  const source = ws.source(page);
+  if (source?.kind === 'image') return rasterCeiling(source.bitmap.width, source.bitmap.height, page);
+  return Infinity;
+}
+
+function rasterCeiling(width, height, page) {
+  const { w, h } = pageSize(page);
+  // Turned a quarter, the picture's width answers for the page's height.
+  const swap = totalQuarter(page) % 180 === 90;
+  const across = (swap ? height : width) / Math.max(1, w);
+  const down = (swap ? width : height) / Math.max(1, h);
+  return Math.max(0.05, Math.min(across, down));
+}
+
+/**
  * Draws one part of a page, at whatever size is asked for.
  *
  * For a sheet far larger than the screen this is the only way to read it: the
@@ -32,49 +61,88 @@ export async function viewportFor(ws, page, scale = 1) {
  * a point the page is drawn once for the whole and then, for the part being
  * looked at, again at the size it is actually being shown.
  *
- * Deliberately only for pages that are drawn straight from the file. A flipped,
- * rasterised or re-backgrounded page is assembled from the finished whole, and a
- * piece of it is not the same thing as a piece of the assembled page; those say
- * so by returning null rather than quietly drawing something subtly wrong.
+ * Every kind of page can be drawn this way, which takes some care:
+ *
+ *   - A mirrored page is made by mirroring the finished picture, so the piece
+ *     to fetch is the mirror image of the piece being asked for, and the piece
+ *     is mirrored in turn once it is drawn.
+ *   - A page that is a picture is cut out of that picture rather than drawn
+ *     again; `detailCeiling` says how fine it is worth asking for.
+ *   - A replaced background is worked out from each pixel on its own, so doing
+ *     it to a piece gives what doing it to the page and cutting would have.
  *
  * @param {Workspace} ws
  * @param {object} page
- * @param {{x: number, y: number, w: number, h: number}} region in display points
+ * @param {{x: number, y: number, w: number, h: number}} region in display
+ *   points, in the page as it is shown
  * @param {{scale?: number, signal?: AbortSignal}} opts
  * @returns {Promise<{canvas: HTMLCanvasElement}|null>}
  */
 export async function renderPageRegion(ws, page, region, { scale = 1, signal } = {}) {
-  if (page.rasterId || page.flipX || page.flipY) return null;
-  if (page.bg && page.bg.mode !== 'none') return null;
-
   const { viewport, pdfPage } = await viewportFor(ws, page, 1);
-  if (!pdfPage) return null;
   const mapper = makeMapper(viewport, page);
+  const winW = mapper.outWidth;
+  const winH = mapper.outHeight;
+
+  // The piece as the page is written, which is the mirror of the piece as it is
+  // shown whenever the page is being shown mirrored.
+  const want = {
+    x: page.flipX ? winW - (region.x + region.w) : region.x,
+    y: page.flipY ? winH - (region.y + region.h) : region.y,
+    w: region.w,
+    h: region.h,
+  };
 
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(1, Math.round(region.w * scale));
   canvas.height = Math.max(1, Math.round(region.h * scale));
   const ctx = canvas.getContext('2d');
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  /*
-   * The whole page is laid out as usual and then shifted so that the wanted
-   * corner lands at the origin. pdf.js still works through the entire drawing —
-   * measured, a corner of a plan costs exactly what the whole sheet costs — but
-   * only what falls inside the canvas is kept, and that is the part that can
-   * then be made as fine as the screen deserves.
-   */
-  const shown = pdfPage.getViewport({ scale, rotation: totalQuarter(page) });
-  const window = mapper.window;
-  const task = pdfPage.render({
-    canvasContext: ctx,
-    viewport: shown,
-    intent: 'print',
-    transform: [1, 0, 0, 1, -(window.x + region.x) * scale, -(window.y + region.y) * scale],
-  });
-  signal?.addEventListener('abort', () => task.cancel(), { once: true });
-  await task.promise;
+  const paper = page.bg?.mode === 'transparent' ? null : page.bg?.color ?? '#ffffff';
+  if (paper) {
+    ctx.fillStyle = paper;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+
+  const raster = ws.raster(page.rasterId);
+  if (raster) {
+    const bitmap = await bitmapFrom(raster);
+    const sx = bitmap.width / winW;
+    const sy = bitmap.height / winH;
+    ctx.drawImage(
+      bitmap,
+      want.x * sx, want.y * sy, want.w * sx, want.h * sy,
+      0, 0, canvas.width, canvas.height,
+    );
+  } else {
+    const source = ws.source(page);
+    if (source?.kind === 'image') {
+      drawRotatedBitmap(ctx, source.bitmap, page, mapper, scale, want);
+    } else if (pdfPage) {
+      /*
+       * The whole page is laid out as usual and then shifted so that the wanted
+       * corner lands at the origin. pdf.js still works through the entire
+       * drawing — measured, a corner of a plan costs exactly what the whole
+       * sheet costs — but only what falls inside the canvas is kept, and that is
+       * the part that can then be made as fine as the screen deserves.
+       */
+      const shown = pdfPage.getViewport({ scale, rotation: totalQuarter(page) });
+      const window = mapper.window;
+      const task = pdfPage.render({
+        canvasContext: ctx,
+        viewport: shown,
+        intent: 'print',
+        transform: [1, 0, 0, 1, -(window.x + want.x) * scale, -(window.y + want.y) * scale],
+      });
+      signal?.addEventListener('abort', () => task.cancel(), { once: true });
+      await task.promise;
+    } else {
+      return null;
+    }
+  }
+
+  if (page.bg && page.bg.mode !== 'none') applyBackground(ctx, canvas, page.bg);
+  if (page.flipX || page.flipY) flipCanvas(ctx, canvas, page);
   return { canvas };
 }
 
@@ -193,7 +261,11 @@ function flipCanvas(ctx, canvas, page) {
   ctx.restore();
 }
 
-function drawRotatedBitmap(ctx, bitmap, page, mapper, scale) {
+/**
+ * @param {{x: number, y: number, w: number, h: number}} [region] part of the
+ *   visible page to draw, in display points; the whole of it by default
+ */
+function drawRotatedBitmap(ctx, bitmap, page, mapper, scale, region) {
   const q = totalQuarter(page);
   const full = document.createElement('canvas');
   const swap = q % 180 === 90;
@@ -207,9 +279,12 @@ function drawRotatedBitmap(ctx, bitmap, page, mapper, scale) {
   const w = mapper.window;
   const sx = full.width / mapper.displayWidth;
   const sy = full.height / mapper.displayHeight;
+  const part = region
+    ? { x: w.x + region.x, y: w.y + region.y, w: region.w, h: region.h }
+    : { x: w.x, y: w.y, w: w.w, h: w.h };
   ctx.drawImage(
     full,
-    w.x * sx, w.y * sy, w.w * sx, w.h * sy,
+    part.x * sx, part.y * sy, part.w * sx, part.h * sy,
     0, 0, ctx.canvas.width, ctx.canvas.height,
   );
 }

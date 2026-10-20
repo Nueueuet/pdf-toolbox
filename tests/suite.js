@@ -10,7 +10,7 @@ import { Workspace, normalizeQuarter } from '../app/core/workspace.js';
 import { TOOLS } from '../app/tools/index.js';
 import { pageScope } from '../app/tools/organize.js';
 import { buildPdf, needsRaster } from '../app/core/export.js';
-import { renderPageCanvas } from '../app/core/render.js';
+import { renderPageCanvas, renderPageRegion, detailCeiling } from '../app/core/render.js';
 import { makeAnnot, applyMark, makeInk, simplifyStroke, inkBounds } from '../app/core/annots.js';
 import { wrapText } from '../app/core/fonts.js';
 import { pageSize } from '../app/core/workspace.js';
@@ -32,7 +32,7 @@ import {
 import {
   targetOf, nameFromUrl, supported, turnOn, turnOff, reconcile, diagnose, looksLikePdf, workspaceFor,
 } from '../app/core/intercept.js';
-import { PDFDocument, StandardFonts, degrees } from '../vendor/pdf-lib.esm.js';
+import { PDFDocument, StandardFonts, degrees, grayscale } from '../vendor/pdf-lib.esm.js';
 import * as pdfjsLib from '../vendor/pdf.mjs';
 
 const tests = [];
@@ -1162,6 +1162,120 @@ test('zooming into a large sheet gets sharper, not just busier', async () => {
     viewer.destroy();
     host.remove();
   }
+});
+
+test('the part being looked at is drawn right on mirrored and rasterised pages', async () => {
+  /*
+   * Drawing only the part being looked at was at first done for plain pages
+   * alone: a page that was mirrored, turned, rasterised by Upscale or given a
+   * background got no detail at all, so those pages stayed unreadable however
+   * far one zoomed in. Each of those changes the frame the region is given in,
+   * and getting one of them backwards puts the wrong part of the sheet on
+   * screen — which looks like detail and is worse than none.
+   *
+   * So the piece is compared against the same part cut out of the whole page.
+   */
+  const doc = await PDFDocument.create();
+  const sheet = doc.addPage([1190, 842]);
+  // A patch of its own shade in every cell, so a piece taken from the wrong
+  // corner — or mirrored the wrong way — cannot match what is under it.
+  const cols = 12;
+  const rows = 9;
+  // Four shades far enough apart that landing on the wrong cell shows, in an
+  // order scrambled enough that a mirrored or shifted piece cannot line up with
+  // it by accident.
+  const shadeAt = (row, col) => {
+    const noise = Math.sin((row + 1) * 12.9898 + (col + 1) * 78.233) * 43758.5453;
+    return [0.05, 0.35, 0.65, 0.95][Math.floor((noise - Math.floor(noise)) * 4)];
+  };
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      sheet.drawRectangle({
+        x: col * (1190 / cols),
+        y: row * (842 / rows),
+        width: 1190 / cols,
+        height: 842 / rows,
+        color: grayscale(shadeAt(row, col)),
+      });
+    }
+  }
+  const bytes = await doc.save();
+
+  const ws = new Workspace();
+  await ws.addFiles([new File([bytes], 'grid.pdf', { type: 'application/pdf' })]);
+  const page = ws.pages[0];
+
+  const grey = (data, width, x, y) => {
+    const i = (y * width + x) * 4;
+    return (data[i] + data[i + 1] + data[i + 2]) / 3;
+  };
+  const read = (canvas) => canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+
+  // Cut a piece out and compare it with the same part of the whole page. It is
+  // deliberately off centre: a piece taken from the middle is its own mirror
+  // image, so mirroring it the wrong way round would go unnoticed.
+  const compare = async (label) => {
+    const scale = 2;
+    const whole = (await renderPageCanvas(ws, page, { scale })).canvas;
+    const shown = { w: whole.width / scale, h: whole.height / scale };
+    const region = { x: shown.w * 0.1, y: shown.h * 0.15, w: shown.w * 0.45, h: shown.h * 0.4 };
+    const piece = (await renderPageRegion(ws, page, region, { scale })).canvas;
+
+    near(piece.width, region.w * scale, 2, `${label}: the piece is the wrong width`);
+    near(piece.height, region.h * scale, 2, `${label}: the piece is the wrong height`);
+
+    const pd = read(piece);
+    const wd = read(whole);
+    let checked = 0;
+    let agreed = 0;
+    let ink = 0;
+    for (let gx = 1; gx < 20; gx++) {
+      for (let gy = 1; gy < 20; gy++) {
+        const x = Math.round((piece.width * gx) / 20);
+        const y = Math.round((piece.height * gy) / 20);
+        const here = grey(pd, piece.width, x, y);
+        const there = grey(wd, whole.width, Math.round(region.x * scale) + x, Math.round(region.y * scale) + y);
+        checked += 1;
+        if (here < 200 || there < 200) ink += 1;
+        if (Math.abs(here - there) < 60) agreed += 1;
+      }
+    }
+    // Enough marks under the samples that agreement means something.
+    assert(ink >= 10, `${label}: only ${ink} of ${checked} samples landed on anything`);
+    assert(agreed / checked > 0.93,
+      `${label}: the piece matches the page at only ${(agreed / checked * 100).toFixed(0)} per cent of samples`);
+  };
+
+  await compare('a plain page');
+
+  page.flipX = true;
+  await compare('mirrored left to right');
+
+  page.flipY = true;
+  page.rotate = 270;
+  await compare('mirrored both ways and turned');
+
+  page.flipX = false;
+  page.flipY = false;
+  page.rotate = 0;
+  page.bg = { mode: 'color', color: '#2244ff', threshold: 0.85 };
+  await compare('with the background replaced');
+  page.bg = null;
+
+  // A page stored as a picture holds only so much detail, and asking for more
+  // than it has is the pointless redraw this was all meant to stop.
+  assert(detailCeiling(ws, page) === Infinity, 'a PDF page should have no ceiling on detail');
+
+  const small = (await renderPageCanvas(ws, page, { scale: 0.5 })).canvas;
+  const blob = await new Promise((resolve) => small.toBlob(resolve, 'image/png'));
+  page.rasterId = ws.putRaster({
+    blob, url: URL.createObjectURL(blob), width: small.width, height: small.height, mime: 'image/png',
+  });
+  near(detailCeiling(ws, page), 0.5, 0.05, 'a page rasterised at half size should cap detail there');
+
+  await compare('rasterised');
+  page.flipX = true;
+  await compare('rasterised and mirrored');
 });
 
 test('a slow page is not redrawn for every notch of the wheel', async () => {

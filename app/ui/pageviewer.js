@@ -13,7 +13,7 @@
  * of doing nothing.
  */
 import { h, clear, icon } from '../util/dom.js';
-import { renderPageCanvas, renderPageRegion, viewportFor } from '../core/render.js';
+import { renderPageCanvas, renderPageRegion, detailCeiling, viewportFor } from '../core/render.js';
 import { makeMapper, totalQuarter } from '../core/geometry.js';
 import { pageSize } from '../core/workspace.js';
 import { cssFamilyFor } from '../core/fonts.js';
@@ -997,7 +997,18 @@ export class PageViewer {
       h: Math.min(box.height, bottom + margin) / scale - Math.max(0, top - margin) / scale,
     };
     const dpr = window.devicePixelRatio || 1;
-    const fine = Math.min(scale * dpr, Math.sqrt(PIXEL_BUDGET / Math.max(1, region.w * region.h)), 8);
+    /*
+     * As fine as the screen deserves, within the same budget the page obeys —
+     * and never finer than the page has to give: a scan or an upscaled page is
+     * a picture, and asking for more of it than it holds spends the time to
+     * produce a blur with more pixels in it.
+     */
+    const fine = Math.min(
+      scale * dpr,
+      Math.sqrt(PIXEL_BUDGET / Math.max(1, region.w * region.h)),
+      detailCeiling(this.ws, page),
+      8,
+    );
     if (fine <= drawn * 1.05) return this.clearDetail(frame);
 
     const token = ++this.detailToken;
