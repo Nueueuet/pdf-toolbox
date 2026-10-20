@@ -915,11 +915,23 @@ button { font: inherit; }
   left: 0;
 }
 
+/*
+ * The part of a large sheet that is being looked at, drawn at the size it is
+ * shown and laid over the stretched picture of the whole page.
+ */
+.viewer__detail {
+  position: absolute;
+  z-index: 1;
+}
+
 .viewer__canvas, .viewer__bitmap {
   width: 100%;
   height: 100%;
   display: block;
 }
+
+/* The detail piece is positioned inside it, so it needs an origin. */
+.viewer__canvas { position: relative; }
 
 .viewer__page .textlayer {
   position: absolute;

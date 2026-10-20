@@ -1090,6 +1090,80 @@ test('a large sheet is drawn once and zoomed into for nothing', async () => {
   }
 });
 
+test('zooming into a large sheet gets sharper, not just busier', async () => {
+  /*
+   * There is a ceiling on how finely a whole page can be drawn — sixteen
+   * megapixels, past which a browser runs out of memory — and a plan hits it
+   * long before anyone has finished zooming in. Past that the page kept being
+   * redrawn at the resolution it already had: the sign said it was drawing, it
+   * drew, and nothing came out sharper. Measured on a plan at four hundred per
+   * cent, half a pixel of picture per pixel of screen.
+   *
+   * What a sheet that size needs is the part being looked at drawn on its own.
+   */
+  const doc = await PDFDocument.create();
+  // Large enough that its own size is already most of the budget.
+  const sheet = doc.addPage([2384, 3370]);
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  for (let i = 0; i < 12; i++) {
+    sheet.drawText(`Detail line ${i} — small print on a big sheet`, { x: 120, y: 3200 - i * 40, size: 11, font });
+  }
+  const bytes = await doc.save();
+
+  const ws = new Workspace();
+  await ws.addFiles([new File([bytes], 'plan.pdf', { type: 'application/pdf' })]);
+  const page = ws.pages[0];
+
+  const host = document.createElement('div');
+  host.className = 'viewer';
+  host.style.cssText = 'position:fixed;left:0;top:0;width:800px;height:600px;opacity:0;z-index:9999';
+  document.body.appendChild(host);
+
+  const viewer = new PageViewer(host, ws, {});
+  const settle = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  try {
+    await viewer.open(page);
+    viewer.setZoom(1);
+    await settle(1200);
+
+    const frame = viewer.frames.get(page.id);
+    const full = () => frame.querySelector('.viewer__bitmap');
+    const detail = () => frame.querySelector('.viewer__detail');
+    assert(full(), 'the sheet was never drawn');
+    assert(!detail(), 'a detail was drawn while the page itself was sharp enough');
+
+    // Far enough in that the whole page cannot be drawn this finely.
+    viewer.setZoom(4);
+    for (let i = 0; i < 40 && !detail(); i++) await settle(150);
+
+    const shownWidth = frame.getBoundingClientRect().width;
+    const pageSharpness = full().width / shownWidth;
+    assert(pageSharpness < 0.8,
+      `this test needs a page that cannot be drawn finely enough; it managed ${pageSharpness.toFixed(2)}`);
+
+    const piece = detail();
+    assert(piece, 'nothing was drawn for the part being looked at');
+    const box = piece.getBoundingClientRect();
+    const sharpness = piece.width / box.width;
+    assert(sharpness > 0.9,
+      `the part being looked at is drawn at ${sharpness.toFixed(2)} pixels per pixel of screen`);
+
+    // And it covers what is actually on screen.
+    const view = viewer.scroller.getBoundingClientRect();
+    assert(box.left <= view.left + 2 && box.top <= view.top + 2
+      && box.right >= view.right - 2 && box.bottom >= view.bottom - 2,
+      'the part drawn does not cover the window');
+
+    // Back out, and it goes away again rather than hanging about stale.
+    viewer.setZoom(0.5);
+    for (let i = 0; i < 40 && detail(); i++) await settle(150);
+    assert(!detail(), 'the detail stayed behind after zooming back out');
+  } finally {
+    viewer.destroy();
+    host.remove();
+  }
+});
+
 test('a slow page is not redrawn for every notch of the wheel', async () => {
   /*
    * A large plan takes seconds to draw, and for a reason that has nothing to do

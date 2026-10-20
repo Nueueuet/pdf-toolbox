@@ -24,6 +24,61 @@ export async function viewportFor(ws, page, scale = 1) {
 }
 
 /**
+ * Draws one part of a page, at whatever size is asked for.
+ *
+ * For a sheet far larger than the screen this is the only way to read it: the
+ * whole page cannot be drawn finely enough to zoom into — an A0 plan at four
+ * times its own size is 171 megapixels, which no browser will allocate — so past
+ * a point the page is drawn once for the whole and then, for the part being
+ * looked at, again at the size it is actually being shown.
+ *
+ * Deliberately only for pages that are drawn straight from the file. A flipped,
+ * rasterised or re-backgrounded page is assembled from the finished whole, and a
+ * piece of it is not the same thing as a piece of the assembled page; those say
+ * so by returning null rather than quietly drawing something subtly wrong.
+ *
+ * @param {Workspace} ws
+ * @param {object} page
+ * @param {{x: number, y: number, w: number, h: number}} region in display points
+ * @param {{scale?: number, signal?: AbortSignal}} opts
+ * @returns {Promise<{canvas: HTMLCanvasElement}|null>}
+ */
+export async function renderPageRegion(ws, page, region, { scale = 1, signal } = {}) {
+  if (page.rasterId || page.flipX || page.flipY) return null;
+  if (page.bg && page.bg.mode !== 'none') return null;
+
+  const { viewport, pdfPage } = await viewportFor(ws, page, 1);
+  if (!pdfPage) return null;
+  const mapper = makeMapper(viewport, page);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(region.w * scale));
+  canvas.height = Math.max(1, Math.round(region.h * scale));
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  /*
+   * The whole page is laid out as usual and then shifted so that the wanted
+   * corner lands at the origin. pdf.js still works through the entire drawing —
+   * measured, a corner of a plan costs exactly what the whole sheet costs — but
+   * only what falls inside the canvas is kept, and that is the part that can
+   * then be made as fine as the screen deserves.
+   */
+  const shown = pdfPage.getViewport({ scale, rotation: totalQuarter(page) });
+  const window = mapper.window;
+  const task = pdfPage.render({
+    canvasContext: ctx,
+    viewport: shown,
+    intent: 'print',
+    transform: [1, 0, 0, 1, -(window.x + region.x) * scale, -(window.y + region.y) * scale],
+  });
+  signal?.addEventListener('abort', () => task.cancel(), { once: true });
+  await task.promise;
+  return { canvas };
+}
+
+/**
  * @param {Workspace} ws
  * @param {object} page
  * @param {{scale?: number, withAnnots?: boolean, signal?: AbortSignal}} opts

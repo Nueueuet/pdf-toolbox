@@ -13,7 +13,7 @@
  * of doing nothing.
  */
 import { h, clear, icon } from '../util/dom.js';
-import { renderPageCanvas, viewportFor } from '../core/render.js';
+import { renderPageCanvas, renderPageRegion, viewportFor } from '../core/render.js';
 import { makeMapper, totalQuarter } from '../core/geometry.js';
 import { pageSize } from '../core/workspace.js';
 import { cssFamilyFor } from '../core/fonts.js';
@@ -39,6 +39,12 @@ const PAGE_GAP = 18;
 
 /** How far beyond the window a page is drawn, so scrolling meets a ready page. */
 const PAINT_MARGIN = 400;
+
+/**
+ * How far beyond the window the detail piece reaches, in screen pixels, so that
+ * nudging the page does not call for the work to be done again.
+ */
+const DETAIL_MARGIN = 220;
 
 /** How many pages either side are drawn in advance when reading one at a time. */
 const PREFETCH_REACH = 2;
@@ -199,6 +205,7 @@ export class PageViewer {
     this.frames = new Map(); // page id -> frame element
     this.layers = new Map(); // page id -> its editing layer
     this.drawCost = new Map(); // page id -> how long its last drawing took, in ms
+    this.detailToken = 0; // bumped so a detail that arrives late is dropped
     this.drawing = new Set(); // page ids being drawn right now
     this.editMode = 'select';
 
@@ -255,6 +262,7 @@ export class PageViewer {
     this.visibility?.disconnect();
     this.offCuts?.();
     clearTimeout(this.sharpenTimer);
+    clearTimeout(this.detailTimer);
     clearTimeout(this.busyTimer);
     this.unwireSelection?.();
   }
@@ -927,6 +935,99 @@ export class PageViewer {
   sharpenSoon() {
     clearTimeout(this.sharpenTimer);
     this.sharpenTimer = setTimeout(() => this.sharpen(), 180);
+    // And the part being looked at, which is the only way a sheet too large to
+    // draw finely can be read at all.
+    this.detailSoon();
+  }
+
+  /**
+   * @param {number} [delay] longer after a drawing than after a scroll: the page
+   *   underneath has just changed, and the piece has to be measured against the
+   *   page as it ended up rather than as it was.
+   */
+  detailSoon(delay = 240) {
+    clearTimeout(this.detailTimer);
+    this.detailTimer = setTimeout(() => this.detail(), delay);
+  }
+
+  /**
+   * Redraws the part of a large sheet that is being looked at, at the size it is
+   * being shown.
+   *
+   * There is a ceiling on how finely a whole page can be drawn — sixteen
+   * megapixels, or a browser runs out of memory — and a plan hits it long before
+   * anyone has finished zooming in. Past that the page kept being redrawn at the
+   * same resolution it already had: the sign said it was drawing, it drew, and
+   * nothing came out sharper. Measured on a plan at four hundred per cent, half
+   * a pixel of picture per pixel of screen.
+   *
+   * So what is on screen is drawn again on its own. The piece is small, so it
+   * can be as fine as the screen deserves; it sits over the stretched picture of
+   * the whole page, which carries on showing everything around it.
+   */
+  async detail() {
+    const id = this.currentPageId;
+    const frame = this.frames.get(id);
+    const page = this.ws.pageById(id);
+    if (!frame || !page || frame.dataset.painting === '1') return;
+
+    const scale = this.effectiveZoom();
+    const drawn = Number(frame.dataset.drawnScale || 0);
+    // Nothing to add while the page itself is drawn finely enough.
+    if (!drawn || drawn >= scale * 0.95) return this.clearDetail(frame);
+
+    const box = frame.getBoundingClientRect();
+    const view = this.scroller.getBoundingClientRect();
+    const left = Math.max(0, view.left - box.left);
+    const top = Math.max(0, view.top - box.top);
+    const right = Math.min(box.width, view.right - box.left);
+    const bottom = Math.min(box.height, view.bottom - box.top);
+    if (right <= left || bottom <= top) return this.clearDetail(frame);
+
+    /*
+     * A margin either side, so a small nudge of the page does not need the work
+     * doing again — and the whole thing capped, because the piece has to obey
+     * the same budget the page does.
+     */
+    const margin = DETAIL_MARGIN;
+    const region = {
+      x: Math.max(0, left - margin) / scale,
+      y: Math.max(0, top - margin) / scale,
+      w: Math.min(box.width, right + margin) / scale - Math.max(0, left - margin) / scale,
+      h: Math.min(box.height, bottom + margin) / scale - Math.max(0, top - margin) / scale,
+    };
+    const dpr = window.devicePixelRatio || 1;
+    const fine = Math.min(scale * dpr, Math.sqrt(PIXEL_BUDGET / Math.max(1, region.w * region.h)), 8);
+    if (fine <= drawn * 1.05) return this.clearDetail(frame);
+
+    const token = ++this.detailToken;
+    this.drawing.add(id);
+    this.syncBusy();
+    try {
+      const made = await renderPageRegion(this.ws, page, region, { scale: fine });
+      if (!made || token !== this.detailToken || !frame.isConnected) return;
+      made.canvas.className = 'viewer__detail';
+      Object.assign(made.canvas.style, {
+        left: `${(region.x / box.width) * 100 * scale}%`,
+        top: `${(region.y / box.height) * 100 * scale}%`,
+        width: `${(region.w / box.width) * 100 * scale}%`,
+        height: `${(region.h / box.height) * 100 * scale}%`,
+      });
+      this.clearDetail(frame);
+      frame.querySelector('.viewer__canvas').appendChild(made.canvas);
+      frame.dataset.detailScale = String(fine / dpr);
+    } catch (err) {
+      if (err?.name !== 'RenderingCancelledException') console.error('viewer detail failed', err);
+    } finally {
+      this.drawing.delete(id);
+      this.syncBusy();
+    }
+  }
+
+  /** Takes the detail away, for when the page beneath it is good enough again. */
+  clearDetail(frame) {
+    frame?.querySelector('.viewer__detail')?.remove();
+    if (frame) delete frame.dataset.detailScale;
   }
 
   sharpen() {
@@ -947,6 +1048,14 @@ export class PageViewer {
        * paid on every notch of the wheel it is an unusable one.
        */
       if ((this.isSlow(id) || isBigSheet(page)) && scale / drawn < 2) continue;
+      /*
+       * And never asked for at all when it cannot come out any better. A sheet
+       * drawn at the largest size that fits in memory is already at its ceiling:
+       * asking again spends the seconds, puts "drawing" in the bar, and hands
+       * back exactly the same picture. What that page needs is the part being
+       * looked at drawn on its own, which is the pass below.
+       */
+      if (drawingScale(page, scale) <= drawn * 1.05) continue;
       // Pages out of view are left alone — they are redrawn when they come into
       // view — but the ones standing by in single layout are the next page and
       // are wanted sharp before they are turned to.
@@ -1020,6 +1129,9 @@ export class PageViewer {
       if (token !== this.renderToken || !frame.isConnected) return;
 
       canvas.className = 'viewer__bitmap';
+      // Clearing the canvas takes the detail with it, which is right: the page
+      // underneath has just been drawn afresh.
+      this.detailToken += 1;
       clear(frame.querySelector('.viewer__canvas')).appendChild(canvas);
       // What the bitmap is good for, rather than what was asked for: a sheet is
       // drawn larger than it is shown so that zooming in needs no second one.
@@ -1044,6 +1156,9 @@ export class PageViewer {
       this.drawing.delete(id);
       this.syncBusy();
       if (frame.dataset.needsRedraw === '1' && frame.isConnected) this.paint(frame, id);
+      // A page too large to draw finely has just been drawn as finely as it
+      // can be; whether that is enough is what the detail pass decides.
+      else if (id === this.currentPageId) this.detailSoon();
     }
   }
 
@@ -1173,6 +1288,13 @@ export class PageViewer {
   wireScroll() {
     let pending = false;
     this.scroller.addEventListener('scroll', () => {
+      /*
+       * Moving about a sheet that is too large to draw finely moves the part
+       * worth drawing finely, so the detail follows the window — once the
+       * scrolling has stopped, since drawing it is the expensive part.
+       */
+      this.detailSoon(220);
+
       if (this.layout !== 'continuous' || pending) return;
       pending = true;
       setTimeout(() => {
